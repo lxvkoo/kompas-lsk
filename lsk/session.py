@@ -30,7 +30,6 @@ class Placer:
         self._frame = None
         self._callback = None
         self._queue: queue.Queue[tuple[int, int]] = queue.Queue()
-        self._skip_next = False
         self.last_base: str | None = None
 
     # ------------------------------------------------------------------
@@ -72,6 +71,11 @@ class Placer:
         self._events = None
         self._frame = None
         self._armed = False
+        while not self._queue.empty():  # накопленные клики уже не нужны
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
         if not quiet:
             self.log("Режим установки выключен")
 
@@ -84,20 +88,27 @@ class Placer:
     # ------------------------------------------------------------------
     def _on_mouse_down(self, pressed_keys, x, y) -> bool:
         """Обработчик КОМПАСа (его поток). Только складываем координаты в очередь."""
+        if not self._armed:
+            return False
+        try:  # реагируем только на левую кнопку, остальное отдаём КОМПАСу
+            keys = self.env.ksapi.IPressedKeys(pressed_keys, self.app)
+            if keys and not keys.IsMouseLeftButton():
+                return False
+        except Exception:
+            pass
         self._queue.put((int(x), int(y)))
         return bool(self.cfg.swallow_click)
 
     def poll(self) -> None:
         """Вызывается из главного потока (Tk `after`)."""
-        try:
-            while True:
+        while True:
+            try:
                 x, y = self._queue.get_nowait()
-                if self._skip_next:
-                    self._skip_next = False
-                    continue
-                self.place(x, y)
-        except queue.Empty:
-            pass
+            except queue.Empty:
+                return
+            if not self._armed:
+                continue
+            self.place(x, y)
 
     # ------------------------------------------------------------------
     def place(self, window_x: int, window_y: int) -> None:
@@ -120,7 +131,7 @@ class Placer:
                 return
 
             origin = snap.point.coords
-            direction = picking.face_direction(self.env, pick, origin, tol)
+            direction = picking.face_direction(self.env, self.app, pick, origin, tol)
             if direction is None:
                 self.log("Не удалось определить направление: под курсором нет грани")
                 return

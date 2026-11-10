@@ -18,7 +18,7 @@ def main() -> int:
     print(LINE)
     print("Диагностика окружения ЛСК-инструмента")
     print(LINE)
-    print(f"Python {sys.version.split()[0]} ({8 * 8 if sys.maxsize > 2**32 else 32}-bit)")
+    print(f"Python {sys.version.split()[0]} ({'64' if sys.maxsize > 2**32 else '32'}-bit)")
 
     try:
         from lsk import kompas

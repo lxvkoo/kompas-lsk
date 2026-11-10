@@ -33,11 +33,15 @@ class Created:
     names: list[str]
 
 
-def _iface(env, cls_name: str, obj):
-    """Привести объект к интерфейсу через QueryInterface (None, если не получилось)."""
+def _iface(env, cls_name: str, obj, app):
+    """Привести объект к интерфейсу через QueryInterface (None, если не получилось).
+
+    Второй аргумент `app` обязателен: обёртка ksapi при неудачном QueryInterface
+    иначе падает на `kompasApp._AddSlave`.
+    """
     cls = getattr(env.ksapi, cls_name)
     try:
-        res = cls(obj, env.ksapi.GetKompas() if obj is None else obj.kompasApp)
+        res = cls(obj, app)
     except Exception:
         return None
     return res if res else None
@@ -162,7 +166,7 @@ class PartModel:
         obj_type = getattr(self.env.constants, "ksObjectLocalCoordinateSystem", 11040)
         container = self.part.GetModelContainer()
         obj = container.AddObject(obj_type)
-        lcs = _iface(self.env, "ILocalCoordinateSystem", obj)
+        lcs = _iface(self.env, "ILocalCoordinateSystem", obj, self.app)
         if not lcs:
             raise KompasModelError("Не удалось создать ЛСК (AddObject не вернул ILocalCoordinateSystem)")
         return lcs

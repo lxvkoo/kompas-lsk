@@ -44,9 +44,9 @@ class Direction:
     warning: str = ""
 
 
-def _face(env, obj):
+def _face(env, obj, app):
     try:
-        res = env.ksapi.IFace(obj, obj.kompasApp)
+        res = env.ksapi.IFace(obj, app)
     except Exception:
         return None
     return res if res else None
@@ -86,7 +86,7 @@ def snap_to_point(points, pick: Pick, tolerance: float) -> Snapped | None:
     return best
 
 
-def face_direction(env, pick: Pick, origin: geometry.Vec, tolerance: float) -> Direction | None:
+def face_direction(env, app, pick: Pick, origin: geometry.Vec, tolerance: float) -> Direction | None:
     """Нормаль грани в точке `origin`.
 
     Из объектов под лучом берём грани и выбираем ту, что ближе всего к точке
@@ -94,7 +94,7 @@ def face_direction(env, pick: Pick, origin: geometry.Vec, tolerance: float) -> D
     """
     faces = []
     for obj in pick.objects:
-        face = _face(env, obj)
+        face = _face(env, obj, app)
         if face is not None:
             faces.append(face)
     if not faces:
