@@ -1,6 +1,7 @@
 """Панель управления (Tkinter): имена ЛСК, направление, отступ, журнал.
 
-Панель всегда сверху, чтобы её можно было держать рядом с окном КОМПАСа.
+Установка ЛСК: навести курсор на 3D-точку в окне модели и нажать горячую
+клавишу (по умолчанию Ctrl+Alt+L). Панель можно держать рядом с КОМПАСом.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ class Panel:
         outer = ttk.Frame(self.root, padding=8)
         outer.grid(row=0, column=0, sticky="nsew")
 
-        ttk.Label(outer, text="Имя ЛСК (тройка: имя, _V, _R):").grid(
+        ttk.Label(outer, text="Имя ЛСК (ставятся три: имя, _V, _R):").grid(
             row=0, column=0, sticky="w", **pad
         )
 
@@ -82,13 +83,15 @@ class Panel:
             settings, text="внутрь", value=-1, variable=self.v_sign, command=self._on_direction
         ).grid(row=0, column=2, sticky="w")
 
-        ttk.Label(settings, text="Ось ЛСК поворота (_R):").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(settings, text="Ось ЛСК поворота (_R):").grid(
+            row=1, column=0, sticky="w", pady=(6, 0)
+        )
         self.r_axis = tk.StringVar(value=self.cfg.preset.r_axis)
-        axis_frame = ttk.Frame(settings)
-        axis_frame.grid(row=1, column=1, columnspan=2, sticky="w", pady=(6, 0))
+        axes = ttk.Frame(settings)
+        axes.grid(row=1, column=1, columnspan=2, sticky="w", pady=(6, 0))
         for i, axis in enumerate(config_mod.R_AXES):
             ttk.Radiobutton(
-                axis_frame, text=axis, value=axis, variable=self.r_axis, command=self._on_direction
+                axes, text=axis, value=axis, variable=self.r_axis, command=self._on_direction
             ).grid(row=0, column=i, padx=2)
 
         numbers = ttk.LabelFrame(outer, text="Параметры", padding=6)
@@ -110,44 +113,45 @@ class Panel:
             numbers, text="«Показывать надпись»", variable=self.show_name, command=self._on_numbers
         ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
-        self.mode_button = tk.Button(
-            outer,
-            text=self._mode_text(),
-            command=self._toggle_mode,
-            height=2,
-            font=("Segoe UI", 10, "bold"),
-            bg="#dfe8f5",
-            activebackground="#cddcf0",
-        )
-        self.mode_button.grid(row=5, column=0, sticky="we", **pad)
+        action = ttk.LabelFrame(outer, text="Установка", padding=6)
+        action.grid(row=5, column=0, sticky="we", **pad)
+        ttk.Label(
+            action,
+            text=f"Наведи курсор на точку в окне модели\nи нажми {self.cfg.hotkey}",
+            justify="center",
+        ).grid(row=0, column=0, sticky="we")
+        self.hotkey_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            action,
+            text="Ловить горячую клавишу",
+            variable=self.hotkey_enabled,
+            command=self._on_hotkey_toggle,
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
         ttk.Button(outer, text="Отменить последнюю тройку ЛСК", command=self.placer.undo_last).grid(
             row=6, column=0, sticky="we", **pad
         )
 
         ttk.Label(outer, text="Журнал:").grid(row=7, column=0, sticky="w", padx=6, pady=(6, 0))
-        self.log_box = tk.Text(outer, height=8, width=46, state="disabled", wrap="word")
+        self.log_box = tk.Text(outer, height=9, width=48, state="disabled", wrap="word")
         self.log_box.grid(row=8, column=0, sticky="we", **pad)
 
-        status = self._status_prefix()
-        ttk.Label(outer, text=status, foreground="#555").grid(
-            row=9, column=0, sticky="w", padx=6, pady=(2, 0)
-        )
-
-    def _status_prefix(self) -> str:
-        v = self.env.features.version
-        return (
-            f"КОМПАС {v[0]}.{v[1]}.{v[2]} · API: {self.env.bin_dir} · "
-            f"ЛСК: {'через коллекцию' if self.env.features.lcs_collection else 'через AddObject'}"
-        )
+        version = self.env.features.version
+        ttk.Label(
+            outer,
+            text=(
+                f"КОМПАС {version[0]}.{version[1]}.{version[2]} · "
+                f"{'ЛСК: коллекция' if self.env.features.lcs_collection else 'ЛСК: AddObject'}"
+            ),
+            foreground="#555",
+        ).grid(row=9, column=0, sticky="w", padx=6, pady=(2, 0))
 
     # ------------------------------------------------------------- события
     def run(self) -> None:
-        self.log("Готово. Выбери имя ЛСК, включи режим и кликай по точкам.")
+        self.log("Готово: выбери имя ЛСК, наведи курсор на точку и нажми горячую клавишу.")
         self.root.mainloop()
 
     def _on_close(self) -> None:
-        self.placer.disarm(quiet=True)
         self._hotkey.stop()
         self._on_numbers()
         self.cfg.save()
@@ -180,13 +184,9 @@ class Panel:
         self.cfg.show_name = bool(self.show_name.get())
         self.cfg.save()
 
-    def _mode_text(self) -> str:
-        state = "ВКЛ" if self.placer.armed else "ВЫКЛ"
-        return f"Режим установки: {state}   ({self.cfg.hotkey})"
-
-    def _toggle_mode(self) -> None:
-        self.placer.toggle()
-        self.mode_button.configure(text=self._mode_text())
+    def _on_hotkey_toggle(self) -> None:
+        enabled = bool(self.hotkey_enabled.get())
+        self.log("Горячая клавиша включена" if enabled else "Горячая клавиша выключена")
 
     # ------------------------------------------------------------- имена
     def _fill_names(self) -> None:
@@ -200,11 +200,9 @@ class Panel:
 
     def _add_name(self) -> None:
         name = simpledialog.askstring(TITLE, "Имя новой ЛСК:", parent=self.root)
-        if not name:
+        if not name or not name.strip():
             return
         name = name.strip()
-        if not name:
-            return
         if any(p.name == name for p in self.cfg.presets):
             messagebox.showwarning(TITLE, f"«{name}» уже есть в списке.", parent=self.root)
             return
@@ -266,13 +264,16 @@ class Panel:
             self.log(f"Горячая клавиша недоступна: {self._hotkey.error}")
 
     def _tick(self) -> None:
-        try:
-            while True:
+        fired = False
+        while True:
+            try:
                 self._hotkey_queue.get_nowait()
-                self._toggle_mode()
-        except queue.Empty:
-            pass
-        self.placer.poll()
-        if self.mode_button.cget("text") != self._mode_text():
-            self.mode_button.configure(text=self._mode_text())
+                fired = True
+            except queue.Empty:
+                break
+        if fired:
+            if self.hotkey_enabled.get():
+                self.placer.place_under_cursor()
+            else:
+                self.log("Горячая клавиша выключена в панели")
         self.root.after(80, self._tick)

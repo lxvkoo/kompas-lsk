@@ -102,25 +102,8 @@ def main() -> int:
         check("вторая тройка удаляется", removed2 == 3, f"удалено {removed2}")
         check("ЛСК не осталось", model.list_lcs() == [], f"{model.list_lcs()}")
 
-        # --- подписка на события мыши (сам клик здесь не проверить) ---
-        try:
-            frame = doc.GetDocumentFrame()
-            events = frame.Events() if frame else None
-            if events is None:
-                print("[skip] подписка на клики — у невидимого документа нет окна "
-                      "(проверяется только на реальной модели)")
-            else:
-                called = []
-                cb = env.ksapi.IDocumentFrameEvents_OnMouseDownHandler(
-                    lambda keys, x, y: called.append((x, y)) or False
-                )
-                events.AddMouseDownHandler("lsk_selftest", cb)
-                events.RemoveAllHandlers("lsk_selftest")
-                check("подписка/отписка на клики", True)
-        except Exception as exc:
-            check("подписка/отписка на клики", False, str(exc))
     finally:
-        doc.Close(2)  # без сохранения
+        doc.Close(0)  # kdDoNotSaveChanges — без запроса на сохранение
 
     print()
     if FAILS:

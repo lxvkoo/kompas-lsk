@@ -62,18 +62,46 @@ row-major 4×4:
 
 ## Клик по модели
 
-* `IDocumentFrame.GetPickRay(windowX, windowY, x, y, z, zx, zy, zz)` — оконные
-  пикселы → точка на ближайшем объекте (`x, y, z`) + направление взгляда (`zx, zy, zz`).
+* `IDocumentFrame.GetPickRay(windowX, windowY, x, y, z, zx, zy, zz)` — по оконным
+  пикселам возвращает **точку на луче** (`x, y, z`, лежит далеко от модели,
+  например `z = −1000 мм`) и **направление взгляда** (`zx, zy, zz`, не единичное).
+  Точки попадания в модель не даёт — это просто прямая.
+  ВАЖНО: координаты пикселей — обычные экранные (y вниз), начало — левый верхний
+  угол клиентской области окна документа.
 * `IKompasDocument3D.PickModelObjects(ray, findObjectParam)` — объекты вдоль луча.
   `ray` — 6 чисел: точка + вектор (ровно то, что вернул `GetPickRay`).
-  `findObjectParam` можно передать `None`.
+  `findObjectParam` можно передать `None` (проверено, не падает).
+* `IApplication.GetMainWindowHandle()` и `IDocumentFrame.GetWindowHandle()` дают
+  **один и тот же** HWND: окно документа занимает всю клиентскую область.`
 * `IKompasDocument3DEx.PickModelObjectsWithLimit(ray, limit, filter, points)` —
   то же плюс точки пересечения (есть в v25, в v22 может отсутствовать).
 * `IFace.NearPointProjection(x, y, z, u, v)` → параметры (u, v) ближайшей точки
   грани; `IFace.GetPoint(u, v)` → 3D-точка; `IFace.GetNormal(u, v)` → нормаль.
 * `IFace.IsPlanar/IsCylinder/IsCone/IsSphere/IsTorus` — тип грани.
+* `IPart.FindObjectsByPoint(x, y, z, firstLevel)` — объекты, проходящие через
+  точку. Это самый надёжный способ получить грань под 3D-точкой (луч не нужен).
+* `IDocumentFrame.UnConvertCoordinates(coordinateType, x, y, z, wx, wy)` —
+  3D → пиксели, но **Y отдаётся с обратным знаком** относительно `GetPickRay`
+  (проверено: точка (0, 50, 20) мм даёт пиксель ниже центра, хотя `GetPickRay`
+  в пикселе ниже центра даёт отрицательный Y). В коде поэтому пиксель точки
+  ищется численно по лучу, а не через `UnConvertCoordinates`.
+* `ConvertCoordTypeEnum`: `kcDocument = 1`, `kcGeoView = 2`, `kcCurrentPlane = 3`.
+* Один пиксель экрана — это несколько миллиметров модели (при `ksZoomAll` на
+  детали 100 мм было ≈ 3.2 мм/пиксель). Поэтому допуск привязки к точке задаётся
+  в пикселях, а не только в миллиметрах.
 
-## События мыши
+## События мыши — НЕ РАБОТАЮТ из Python (проверено)
+
+Кратко: подписка оформляется без ошибок, КОМПАС остаётся жив, но обработчик
+**не вызывается ни разу** — ни на настоящий клик (SendInput), ни с запущенным
+`ksapi.RunLoop()`, ни без него. Синтетический `PostMessage(WM_LBUTTONDOWN)` в окно
+документа привёл к падению КОМПАСа. Вывод: перехват клика не используем, точку
+берём по позиции курсора в момент нажатия горячей клавиши.
+
+Подробности эксперимента — `tools/check_click.py`, `tools/check_click2.py`,
+`tools/check_click3.py`.
+
+## События мыши (справочно)
 
 ```python
 cb = ksapi.IDocumentFrameEvents_OnMouseDownHandler(fn)   # CFUNCTYPE(c_bool, c_uint64, c_int32, c_int32)
@@ -87,6 +115,11 @@ frame.Events().RemoveAllHandlers("owner")
 
 ## Грабли
 
+* `IKompasDocument.Close(closeOptions)`, где `DocumentCloseOptions`
+  (`constants.kdDoNotSaveChanges = 0`, `kdSaveChanges = 1`,
+  `kdPromptToSaveChanges = 2`). Значение `2` — это **запрос на сохранение**:
+  на изменённом документе вылезает модальный диалог и все дальнейшие вызовы API
+  висят. Всегда закрывать тестовые документы через `0`.
 * Разрядность Python и КОМПАСа должна совпадать (x64).
 * `ksapi.IAPIObject.__init__` при неудачном `QueryInterface` обращается к
   `kompasApp._AddSlave`, поэтому интерфейс нужно приводить как

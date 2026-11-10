@@ -34,10 +34,10 @@ class Preset:
 class Config:
     presets: list[Preset] = field(default_factory=lambda: [Preset(n) for n in DEFAULT_NAMES])
     offset_mm: float = 10.0        # отступ векторной и поворотной ЛСК от базовой
-    snap_tol_mm: float = 3.0       # радиус привязки клика к 3D-точке модели
+    snap_tol_mm: float = 3.0       # минимум допуска привязки к 3D-точке модели
+    snap_tol_px: float = 10.0      # и то же в пикселях экрана (зависит от масштаба вида)
     show_name: bool = True         # включать «Показывать надпись» у ЛСК
     hotkey: str = "Ctrl+Alt+L"
-    swallow_click: bool = True     # не отдавать клик КОМПАСу (не менять выделение)
     active: int = 0                # индекс выбранного пресета
 
     # --- доступ к текущему пресету -------------------------------------
@@ -74,9 +74,9 @@ class Config:
                 presets=presets or [Preset(n) for n in DEFAULT_NAMES],
                 offset_mm=float(raw.get("offset_mm", 10.0)),
                 snap_tol_mm=float(raw.get("snap_tol_mm", 3.0)),
+                snap_tol_px=float(raw.get("snap_tol_px", 10.0)),
                 show_name=bool(raw.get("show_name", True)),
                 hotkey=str(raw.get("hotkey", "Ctrl+Alt+L")),
-                swallow_click=bool(raw.get("swallow_click", True)),
                 active=int(raw.get("active", 0)),
             )
             for p in cfg.presets:  # защита от опечаток в файле
