@@ -43,14 +43,7 @@ class Panel:
         self.root.resizable(False, False)
         self.root.attributes("-topmost", True)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        try:
-            from .report import resource_path
-
-            icon = resource_path("icon.ico")
-            if icon.is_file():
-                self.root.iconbitmap(default=str(icon))
-        except Exception:
-            pass
+        self._set_window_icon()
 
         self.placer = Placer(
             env=env,
@@ -64,6 +57,25 @@ class Panel:
         self._build()
         self._start_watcher()
         self.root.after(50, self._tick)
+
+    def _set_window_icon(self) -> None:
+        """Иконка окна: PNG через iconphoto (Tk не понимает PNG внутри .ico)."""
+        from .report import resource_path
+
+        for name, use_photo in (("icon_32.png", True), ("icon.png", True), ("icon.ico", False)):
+            path = resource_path(name)
+            if not path.is_file():
+                continue
+            try:
+                if use_photo:
+                    image = tk.PhotoImage(file=str(path))
+                    self.root.iconphoto(True, image)
+                    self._icon_image = image  # ссылка, иначе Tk её выбросит
+                else:
+                    self.root.iconbitmap(default=str(path))
+                return
+            except Exception:
+                continue
 
     # ------------------------------------------------------------------ UI
     def _build(self) -> None:
