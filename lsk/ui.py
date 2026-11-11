@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
 from . import config as config_mod
+from . import win32cursor
 from .hotkey import KeyWatcher, parse_hotkey
 from .overlay import DirectionOverlay
 from .session import Placer
@@ -34,6 +35,8 @@ class Panel:
         self.cfg = cfg
         self._events: queue.Queue[str] = queue.Queue()
         self._log_lines = 0
+        self._kompas_pid_value: int | None = None
+        self._last_inactive_hint = 0.0
 
         self.root = tk.Tk()
         self.root.title(TITLE)
@@ -113,6 +116,13 @@ class Panel:
         ttk.Button(action, text="Применить", width=10, command=self._apply_hotkey).grid(
             row=1, column=2, sticky="w", pady=(8, 0)
         )
+        self.hotkey_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            action,
+            text="Инструмент включён (клавиша работает только в окне КОМПАСа)",
+            variable=self.hotkey_enabled,
+            command=self._on_hotkey_toggle,
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         ttk.Button(outer, text="Удалить последнюю тройку ЛСК", command=self.placer.undo_last).grid(
             row=5, column=0, sticky="we", **pad
@@ -221,16 +231,56 @@ class Panel:
         self.log_box.configure(state="disabled")
         print(text)
 
+    def _hint_inactive(self) -> None:
+        """Подсказка, если клавишу нажали, а окно КОМПАСа не активно."""
+        import time
+
+        now = time.time()
+        if now - self._last_inactive_hint < 3.0:
+            return
+        self._last_inactive_hint = now
+        self.log("Окно КОМПАСа не активно — сначала кликни в него, потом жми клавишу")
+
+    def _kompas_pid(self) -> int:
+        if self._kompas_pid_value is None:
+            try:
+                hwnd = self.app.GetMainWindowHandle()
+            except Exception:
+                hwnd = 0
+            self._kompas_pid_value = win32cursor.process_id_of_window(hwnd) if hwnd else 0
+        return self._kompas_pid_value
+
+    def _kompas_is_foreground(self) -> bool:
+        """Активно ли окно КОМПАСа (в других программах инструмент молчит)."""
+        pid = self._kompas_pid()
+        if not pid:
+            return True  # не смогли определить — не мешаем работе
+        return win32cursor.foreground_process_id() == pid
+
     def _start_watcher(self) -> None:
         self._watcher = KeyWatcher(
             self.cfg.hotkey,
             on_press=lambda: self._events.put("press"),
             on_release=lambda: self._events.put("release"),
+            is_active=self._kompas_is_foreground,
+            is_enabled=lambda: bool(self.hotkey_enabled.get()),
         )
         if not self._watcher.start():
             self.log(f"Горячая клавиша недоступна: {self._watcher.error}")
-        elif self._watcher.error:
-            self.log(self._watcher.error)
+            return
+        parsed = parse_hotkey(self.cfg.hotkey)
+        if parsed is not None and parsed[0] == 0:
+            self.log(
+                f"«{self.cfg.hotkey}» без Ctrl/Alt: пока активно окно КОМПАСа, "
+                "эта клавиша перехватывается целиком. Лучше добавить модификатор."
+            )
+
+    def _on_hotkey_toggle(self) -> None:
+        self.log(
+            "Инструмент включён"
+            if self.hotkey_enabled.get()
+            else "Инструмент выключен: клавиша не перехватывается, КОМПАС работает как обычно"
+        )
 
     def _refresh_overlay(self) -> None:
         """Показать/обновить стрелку-подсказку во время протяжки."""
@@ -260,6 +310,9 @@ class Panel:
             except queue.Empty:
                 break
             if event == "press":
+                if not self._kompas_is_foreground():
+                    self._hint_inactive()
+                    continue
                 self.placer.on_press()
                 self._refresh_overlay()
             else:

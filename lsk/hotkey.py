@@ -2,8 +2,13 @@
 
 `RegisterHotKey` умеет сообщать только о нажатии, а нам нужен жест
 «зажал клавишу → потянул мышью → отпустил». Поэтому состояние клавиши
-опрашивается через `GetAsyncKeyState`; дополнительно клавиша регистрируется
-глобально, чтобы КОМПАС её не получал.
+опрашивается через `GetAsyncKeyState`.
+
+Важно: клавиша работает **только когда активно окно КОМПАСа** (проверяется
+владелец активного окна), и только если инструмент включён. Регистрация через
+`RegisterHotKey` включается на то же время — чтобы КОМПАС не получал эту
+клавишу, пока инструмент работает, и чтобы ничего не «съедалось» в других
+программах.
 """
 
 from __future__ import annotations
@@ -74,12 +79,14 @@ class KeyWatcher:
     """Следит за комбинацией: сообщает о нажатии и об отпускании."""
 
     def __init__(self, spec: str, on_press, on_release, interval: float = 0.02,
-                 hotkey_id: int = 0xB10C):
+                 hotkey_id: int = 0xB10C, is_active=None, is_enabled=None):
         self.spec = spec
         self.on_press = on_press
         self.on_release = on_release
         self.interval = interval
         self.hotkey_id = hotkey_id
+        self.is_active = is_active      # «активно ли окно КОМПАСа»
+        self.is_enabled = is_enabled    # «включён ли инструмент»
         self.error: str = ""
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -91,15 +98,40 @@ class KeyWatcher:
         if not self._parsed:
             self.error = f"не разобрал сочетание «{self.spec}»"
             return False
-        mods, vk = self._parsed
-        # пробуем «забрать» клавишу у КОМПАСа (не критично, если не выйдет)
-        self._registered = bool(user32.RegisterHotKey(None, self.hotkey_id, mods | MOD_NOREPEAT, vk))
-        if not self._registered:
-            self.error = "клавиша занята другой программой (всё равно слежу за ней)"
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         return True
+
+    # ------------------------------------------------------------------
+    def _enabled_now(self) -> bool:
+        """Инструмент вообще включён (галочка в панели)."""
+        if self.is_enabled is None:
+            return True
+        try:
+            return bool(self.is_enabled())
+        except Exception:
+            return False
+
+    def _active_now(self) -> bool:
+        """Активно ли окно КОМПАСа — только тогда клавишу «забираем» у КОМПАСа."""
+        if self.is_active is None:
+            return True
+        try:
+            return bool(self.is_active())
+        except Exception:
+            return False
+
+    def _sync_registration(self, should_register: bool) -> None:
+        """«Забрать» клавишу у КОМПАСа, только пока инструмент активен."""
+        mods, vk = self._parsed
+        if should_register and not self._registered:
+            self._registered = bool(
+                user32.RegisterHotKey(None, self.hotkey_id, mods | MOD_NOREPEAT, vk)
+            )
+        elif not should_register and self._registered:
+            user32.UnregisterHotKey(None, self.hotkey_id)
+            self._registered = False
 
     def _combo_down(self) -> bool:
         mods, vk = self._parsed
@@ -116,6 +148,12 @@ class KeyWatcher:
     def _run(self) -> None:
         previous = False
         while not self._stop.is_set():
+            enabled = self._enabled_now()
+            self._sync_registration(enabled and self._active_now())
+            if not enabled:
+                previous = False
+                self._stop.wait(self.interval)
+                continue
             try:
                 down = self._combo_down()
             except Exception:

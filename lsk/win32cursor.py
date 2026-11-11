@@ -62,3 +62,7 @@ def process_id_of_window(hwnd: int) -> int:
 def foreground_process_id() -> int:
     hwnd = user32.GetForegroundWindow()
     return process_id_of_window(hwnd) if hwnd else 0
+
+
+def foreground_window() -> int:
+    return int(user32.GetForegroundWindow() or 0)
