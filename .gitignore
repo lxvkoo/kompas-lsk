@@ -12,3 +12,7 @@ _overlay_shot.png
 _*.png
 for_v22/
 sdk_v22/
+dist_fast/
+build_fast/
+dist/*.zip
+version_info_*.txt

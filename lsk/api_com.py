@@ -553,7 +553,38 @@ class ComApi:
         self._app: _Application | None = None
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _prepare_comtypes_cache():
+        """Ускорить COM-старт: кэш сгенерированных описаний + байткод.
+
+        comtypes генерирует из typelib большой модуль и импортирует его. В
+        frozen-сборке PyInstaller запрещает запись .pyc, поэтому этот модуль
+        компилировался заново при каждом запуске (~1 с). Включаем запись
+        байткода и держим кэш в стабильном каталоге (иначе он зависит от имени exe).
+        """
+        import os
+        import sys
+
+        sys.dont_write_bytecode = False
+        root = (
+            os.environ.get("LOCALAPPDATA")
+            or os.environ.get("TEMP")
+            or os.path.expanduser("~")
+        )
+        cache = Path(root) / "lsk_placer" / "comtypes"
+        try:
+            cache.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+        try:
+            import comtypes.client
+
+            comtypes.client.gen_dir = str(cache)
+        except Exception:
+            pass
+
     def _load_typelib(self):
+        self._prepare_comtypes_cache()
         import comtypes.client
 
         for name in ("kAPI7.tlb", "kAPI.tlb", "KSAPI.tlb"):
@@ -603,6 +634,7 @@ class ComApi:
     # ------------------------------------------------------------------
     def GetKompas(self):
         """Подключиться к запущенному КОМПАСу (или None)."""
+        self._prepare_comtypes_cache()
         import comtypes.client
 
         if self._app is not None:
