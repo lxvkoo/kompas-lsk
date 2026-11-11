@@ -60,6 +60,19 @@ def main() -> int:
     doc = app.GetDocuments().AddWithDefaultSettings(env.constants.ksDocumentPart, True)
     try:
         doc.SetActive()
+        # новый документ должен стать активным, иначе Placer возьмёт чужой
+        for _ in range(30):
+            active = app.GetActiveDocument()
+            if active and active.GetFullPath() == doc.GetFullPath():
+                break
+            doc.SetActive()
+            import time as _t
+
+            _t.sleep(0.1)
+        else:
+            check("временный документ активен", False, "КОМПАС не переключился на новый документ")
+            return 1
+
         doc3d = env.ksapi.IKompasDocument3D(doc, app)
         part = doc3d.GetTopPart()
         container = part.GetModelContainer()

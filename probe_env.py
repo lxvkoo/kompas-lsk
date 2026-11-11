@@ -14,7 +14,35 @@ import sys
 LINE = "-" * 60
 
 
+def _prepare_console() -> None:
+    """Чтобы русский текст нормально выводился в консоли и попадал в файл."""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    try:
+        import ctypes
+
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+    except Exception:
+        pass
+
+
+def _save_report(text: str) -> None:
+    """Дублировать вывод в файл рядом с exe — удобно прислать разработчику."""
+    from pathlib import Path
+
+    base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path.cwd()
+    try:
+        path = base / "probe_report.txt"
+        path.write_text(text, encoding="utf-8")
+        print(f"\nОтчёт сохранён: {path}")
+    except OSError:
+        pass
+
+
 def main() -> int:
+    _prepare_console()
     print(LINE)
     print("Диагностика окружения ЛСК-инструмента")
     print(LINE)
@@ -77,5 +105,34 @@ def main() -> int:
     return 0
 
 
+class _Tee:
+    """Пишем и в консоль, и в буфер — чтобы сохранить отчёт в файл."""
+
+    def __init__(self):
+        self._parts: list[str] = []
+
+    def write(self, text: str) -> None:
+        self._parts.append(text)
+        try:
+            sys.__stdout__.write(text)
+        except Exception:
+            pass
+
+    def flush(self) -> None:
+        pass
+
+    def text(self) -> str:
+        return "".join(self._parts)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _prepare_console()
+    tee = _Tee()
+    original = sys.stdout
+    sys.stdout = tee
+    try:
+        code = main()
+    finally:
+        sys.stdout = original
+    _save_report(tee.text())
+    sys.exit(code)
