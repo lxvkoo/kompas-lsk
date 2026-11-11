@@ -86,6 +86,8 @@ class Config:
                     p.r_axis = "+X"
             if cfg.orientation not in ("global", "normal"):
                 cfg.orientation = "global"
+            if cfg.hotkey.upper() in ("CTRL+ALT+L", "CTRL+ALT+L".upper()):
+                cfg.hotkey = "Ctrl+1"  # старое значение по умолчанию
             return cfg
         except (TypeError, ValueError):
             return cls()

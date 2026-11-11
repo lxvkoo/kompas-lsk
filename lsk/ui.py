@@ -202,6 +202,21 @@ class Panel:
         self.cfg.show_name = bool(self.show_name.get())
         self.cfg.save()
 
+    def _apply_hotkey(self) -> None:
+        from .hotkey import parse_hotkey
+
+        spec = self.hotkey_var.get().strip()
+        if parse_hotkey(spec) is None:
+            self.log(f"Не понял сочетание «{spec}». Пример: Ctrl+1, Ctrl+Alt+L, F9")
+            return
+        self._hotkey.stop()
+        self.cfg.hotkey = spec
+        self.cfg.save()
+        self._start_hotkey()
+        self.hint.configure(text=f"Наведи курсор на точку в окне модели\nи нажми {spec}")
+        if not self._hotkey.error:
+            self.log(f"Горячая клавиша: {spec}")
+
     def _on_hotkey_toggle(self) -> None:
         enabled = bool(self.hotkey_enabled.get())
         self.log("Горячая клавиша включена" if enabled else "Горячая клавиша выключена")
