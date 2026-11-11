@@ -149,6 +149,7 @@ class Panel:
     # ------------------------------------------------------------- события
     def run(self) -> None:
         self.log("Готово: выбери имя ЛСК, наведи курсор на точку и нажми горячую клавишу.")
+        self.log(self.placer.describe_model())
         self.root.mainloop()
 
     def _on_close(self) -> None:

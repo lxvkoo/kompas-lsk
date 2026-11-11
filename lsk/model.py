@@ -79,6 +79,14 @@ class PartModel:
         return self.attach(doc)
 
     # ------------------------------------------------------------------
+    def _aux_container(self):
+        """IAuxiliaryGeomContainer у детали (через QueryInterface)."""
+        try:
+            aux = self.env.ksapi.IAuxiliaryGeomContainer(self.part, self.app)
+        except Exception:
+            return None
+        return aux if aux else None
+
     def _lcs_collection(self):
         """Коллекция ЛСК детали.
 
@@ -131,28 +139,99 @@ class PartModel:
         except Exception:
             return None
 
-    def points(self) -> list[PointInfo]:
-        """Все 3D-точки модели (в т.ч. проставленные пользователем вручную)."""
+    def _point_info(self, obj, fallback_name: str) -> PointInfo | None:
+        """Объект модели -> PointInfo, если из него можно прочитать координаты."""
+        point = _iface(self.env, "IPoint3D", obj, self.app)
+        if point is None:
+            return None
         try:
-            coll = self.part.GetModelContainer().GetPoints3D()
-        except Exception as exc:
-            raise KompasModelError(f"Не удалось получить точки модели: {exc}") from exc
-        if not coll:
+            name = point.GetName() or fallback_name
+        except Exception:
+            name = fallback_name
+        try:
+            return PointInfo(name=name, coords=(point.GetX(), point.GetY(), point.GetZ()))
+        except Exception:
+            return None
+
+    def points(self, rebuild_if_empty: bool = True) -> list[PointInfo]:
+        """Все 3D-точки модели, любым способом созданные.
+
+        `IModelContainer.GetPoints3D()` отдаёт точки, созданные через API; точки из
+        интерфейса КОМПАСа («Точка», «Точка в центре») могут лежать в других
+        коллекциях, поэтому собираем из всех известных источников и убираем дубли.
+        Если список пуст, а модель могла быть только что изменена — пересчитываем.
+        """
+        result = self._gather_points()
+        if not result and rebuild_if_empty:
+            self.rebuild(redraw=False)
+            result = self._gather_points()
+        return result
+
+    def _gather_points(self) -> list[PointInfo]:
+        c3d = self.env.constants3d
+        try:
+            container = self.part.GetModelContainer()
+        except Exception:
             return []
-        result: list[PointInfo] = []
-        for i in range(coll.GetCount()):
-            pt = coll.GetPoint3D(i)
-            if not pt:
-                continue
+        found: list[PointInfo] = []
+
+        # 1) штатная коллекция точек
+        try:
+            coll = container.GetPoints3D()
+            for i in range(coll.GetCount() if coll else 0):
+                info = self._point_info(coll.GetPoint3D(i), f"Точка {i + 1}")
+                if info:
+                    found.append(info)
+        except Exception:
+            pass
+
+        # 2) объекты модели по типам точек
+        for obj_type in (
+            getattr(c3d, "o3d_point3D", 70),
+            getattr(c3d, "o3d_conjunctivePoint", 68),
+            getattr(c3d, "o3d_controlPoint", 67),
+        ):
             try:
-                result.append(
-                    PointInfo(
-                        name=pt.GetName() or f"Точка {i + 1}",
-                        coords=(pt.GetX(), pt.GetY(), pt.GetZ()),
-                    )
-                )
+                for obj in container.GetModelObjects([obj_type]) or []:
+                    info = self._point_info(obj, "Точка")
+                    if info:
+                        found.append(info)
             except Exception:
                 continue
+
+        # 3) коллекции вспомогательной геометрии
+        aux = self._aux_container()
+        if aux is not None:
+            for method in ("GetConjunctivePoints", "GetControlPoints"):
+                try:
+                    coll = getattr(aux, method)()
+                except Exception:
+                    continue
+                for i in range(coll.GetCount() if coll else 0):
+                    try:
+                        obj = coll.GetItem(i)
+                    except Exception:
+                        obj = None
+                    info = self._point_info(obj, "Точка") if obj else None
+                    if info:
+                        found.append(info)
+
+        return self._dedupe(found)
+
+    @staticmethod
+    def _dedupe(points: list[PointInfo]) -> list[PointInfo]:
+        seen: set[tuple] = set()
+        result: list[PointInfo] = []
+        for info in points:
+            key = (
+                round(info.coords[0] * 1e6),
+                round(info.coords[1] * 1e6),
+                round(info.coords[2] * 1e6),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(info)
         return result
 
     # ------------------------------------------------------------------

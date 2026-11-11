@@ -29,6 +29,27 @@ class Placer:
         self.last_base: str | None = None
 
     # ------------------------------------------------------------------
+    def describe_model(self) -> str:
+        """Короткая сводка по активной детали — для журнала и панели."""
+        try:
+            self.model.refresh()
+        except KompasModelError as exc:
+            return str(exc)
+        try:
+            points = len(self.model.points())
+        except Exception:
+            points = -1
+        try:
+            faces = len(self.model.part.GetModelContainer().GetObjects(self.env.constants3d.o3d_face) or [])
+        except Exception:
+            faces = -1
+        name = self.model.doc.GetName() or "(без имени)"
+        return (
+            f"документ «{name}»: 3D-точек {points}, граней {faces}, "
+            f"ЛСК {len(self.model.list_lcs())}"
+        )
+
+    # ------------------------------------------------------------------
     def place_under_cursor(self) -> bool:
         """Поставить тройку ЛСК по 3D-точке под курсором."""
         preset = self.cfg.preset
@@ -61,8 +82,8 @@ class Placer:
             points = self.model.points()
             if not points:
                 self.log(
-                    "В модели нет 3D-точек. Проставь их инструментом «Точка» / "
-                    "«Точка в центре» и повтори."
+                    f"В документе «{self.model.doc.GetName() or 'без имени'}» нет 3D-точек. "
+                    "Проставь их инструментом «Точка» / «Точка в центре» и повтори."
                 )
                 return False
 

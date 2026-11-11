@@ -148,17 +148,51 @@ def face_at_point(env, app, model, point: geometry.Vec, tolerance: float) -> Dir
             continue
 
     if best is None:
+        # точки, которые пользователь поставил «в воздухе», в грани не попадают —
+        # берём ближайшую грань всей модели
+        best = _nearest_face(env, app, model, point)
+
+    if best is None:
         return None
 
     dist, normal, face = best
     warning = ""
     if dist > tolerance:
         warning = (
-            f"точка не лежит на грани (расстояние {dist / 0.001:.2f} мм) — "
-            "направление взято по ближайшей грани"
+            f"точка не лежит на грани (ближайшая в {dist / 0.001:.2f} мм) — "
+            "направление взято по ней. Точку лучше ставить на поверхность."
         )
     return Direction(normal=normal, distance=dist, source=face_kind(face), face=face,
                      warning=warning)
+
+
+def _nearest_face(env, app, model, point: geometry.Vec):
+    """Ближайшая грань модели к точке: перебор всех граней детали."""
+    try:
+        faces = model.part.GetModelContainer().GetObjects(env.constants3d.o3d_face) or []
+    except Exception:
+        return None
+    best = None
+    for obj in faces:
+        face = _cast(env, app, "IFace", obj)
+        if face is None:
+            continue
+        try:
+            ok, u, v = face.NearPointProjection(point[0], point[1], point[2], 0.0, 0.0)
+            if not ok:
+                continue
+            ok, x, y, z = face.GetPoint(u, v, 0.0, 0.0, 0.0)
+            if not ok:
+                continue
+            dist = geometry.distance((x, y, z), point)
+            ok, nx, ny, nz = face.GetNormal(u, v, 0.0, 0.0, 0.0)
+            if not ok or geometry.length((nx, ny, nz)) < 1e-9:
+                continue
+            if best is None or dist < best[0]:
+                best = (dist, geometry.normalize((nx, ny, nz)), face)
+        except Exception:
+            continue
+    return best
 
 
 def face_kind(face) -> str:
