@@ -15,6 +15,12 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def resource_path(name: str) -> Path:
+    """Путь к файлу-ресурсу: рядом с exe или внутри сборки PyInstaller."""
+    base = Path(getattr(sys, "_MEIPASS", app_dir()))
+    return base / name
+
+
 def save_and_show(text: str, filename: str, open_in_notepad: bool = True) -> Path:
     """Сохранить отчёт рядом с exe и показать его пользователю."""
     path = app_dir() / filename

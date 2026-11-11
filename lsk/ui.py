@@ -43,6 +43,14 @@ class Panel:
         self.root.resizable(False, False)
         self.root.attributes("-topmost", True)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        try:
+            from .report import resource_path
+
+            icon = resource_path("icon.ico")
+            if icon.is_file():
+                self.root.iconbitmap(default=str(icon))
+        except Exception:
+            pass
 
         self.placer = Placer(
             env=env,
