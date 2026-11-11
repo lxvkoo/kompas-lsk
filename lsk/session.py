@@ -205,7 +205,10 @@ class Placer:
         try:
             self.model.refresh()
             removed = self.model.undo_triplet(self.last_base)
-            self.log(f"Удалено ЛСК: {removed} ({self.last_base})")
+            if removed < 0:
+                self.log(f"Отменено командой КОМПАСа: {self.last_base} (и _V, _R)")
+            else:
+                self.log(f"Удалено ЛСК: {removed} ({self.last_base})")
             self.last_base = None
         except KompasModelError as exc:
             self.log(f"Ошибка: {exc}")
