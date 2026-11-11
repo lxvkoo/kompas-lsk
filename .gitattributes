@@ -1,0 +1,11 @@
+# нормализация переводов строк: в репозитории LF, в виндовых файлах CRLF
+* text=auto
+*.py  text eol=lf
+*.md  text eol=lf
+*.bat text eol=crlf
+
+# двоичные файлы — не трогать и не считать текстом
+*.ico binary
+*.png binary
+*.exe binary
+*.zip binary
