@@ -66,8 +66,8 @@ class Placer:
             if window_x < 0:
                 self.log("Не смог определить позицию курсора")
                 return False
-            left, top, right, bottom = frame.GetWorkAreaRect(0, 0, 0, 0)
-            if not (left <= window_x <= right and top <= window_y <= bottom):
+            width, height = win32cursor.client_size(hwnd)
+            if not (0 <= window_x < width and 0 <= window_y < height):
                 self.log("Курсор не над областью модели — наведи его на деталь в окне КОМПАСа")
                 return False
 
@@ -94,24 +94,32 @@ class Placer:
                     for p in points
                 )
                 self.log(
-                    f"Рядом нет точки: ближайшая в {nearest / 0.001:.1f} мм "
+                    f"Рядом нет точки: ближайшая в {geometry.to_mm(nearest):.1f} мм "
                     f"(допуск {self.cfg.snap_tol_mm:g} мм). Курсор — точно на точку?"
                 )
                 return False
 
             origin = snap.point.coords
-            direction = picking.face_at_point(self.env, self.app, self.model, origin, tol)
-            if direction is None:
-                self.log(
-                    "Не нашёл грань через эту точку — не могу определить направление. "
-                    "Точка должна лежать на грани детали."
-                )
-                return False
-
-            normal = direction.normal
-            if preset.v_sign < 0:
-                normal = geometry.mul(normal, -1.0)
-            axes = geometry.frame_from_normal(normal)
+            if self.cfg.orientation == "normal":
+                # «с проворотом»: Y = нормаль грани в точке
+                direction = picking.face_at_point(self.env, self.app, self.model, origin, tol)
+                if direction is None:
+                    self.log(
+                        "Не нашёл грань через эту точку — не могу определить направление. "
+                        "Точка должна лежать на грани детали."
+                    )
+                    return False
+                normal = direction.normal
+                if preset.v_sign < 0:
+                    normal = geometry.mul(normal, -1.0)
+                axes = geometry.frame_from_normal(normal)
+                source = direction.source
+                warning = direction.warning
+            else:
+                # «без проворота»: оси как у детали, ЛСК только смещаются по координатам
+                axes = geometry.GLOBAL_AXES
+                source = "оси детали"
+                warning = ""
 
             names = [preset.name, preset.name + "_V", preset.name + "_R"]
             duplicates = self.model.existing(names)
@@ -131,12 +139,13 @@ class Placer:
             self.last_base = preset.name
             self.log(
                 f"{preset.name}: точка «{snap.point.name}» "
-                f"({origin[0] / 0.001:.2f}, {origin[1] / 0.001:.2f}, {origin[2] / 0.001:.2f}) мм, "
-                f"грань: {direction.source}, R:{preset.r_axis}, "
+                f"({geometry.to_mm(origin[0]):.2f}, {geometry.to_mm(origin[1]):.2f}, "
+                f"{geometry.to_mm(origin[2]):.2f}) мм, "
+                f"ориентация: {source}, R:{preset.r_axis}, "
                 f"V:{'наружу' if preset.v_sign > 0 else 'внутрь'}"
             )
-            if direction.warning:
-                self.log("  ! " + direction.warning)
+            if warning:
+                self.log("  ! " + warning)
             if duplicates:
                 self.log("  ! созданы поверх существующих: " + ", ".join(duplicates))
             return True

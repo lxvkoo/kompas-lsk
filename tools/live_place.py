@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lsk import geometry, kompas, picking  # noqa: E402
 from lsk.model import PartModel  # noqa: E402
 
-MM = 0.001
+MM = 1.0  # единицы API КОМПАСа — миллиметры
 
 
 def main() -> int:
@@ -34,6 +34,8 @@ def main() -> int:
     parser.add_argument("--offset", type=float, default=10.0)
     parser.add_argument("--inside", action="store_true")
     parser.add_argument("--undo", action="store_true")
+    parser.add_argument("--normal", action="store_true",
+                        help="ориентация по нормали грани (по умолчанию — без проворота)")
     parser.add_argument("--tolerance", type=float, default=1.0)
     args = parser.parse_args()
 
@@ -77,23 +79,26 @@ def main() -> int:
         return 1
 
     point = points[args.index]
-    direction = picking.face_at_point(
-        env, app, model, point.coords, geometry.mm(args.tolerance)
-    )
-    if direction is None:
-        print("\nне нашёл грань через эту точку — направление определить нечем")
-        return 1
-
-    normal = direction.normal
-    if args.inside:
-        normal = geometry.mul(normal, -1.0)
-    axes = geometry.frame_from_normal(normal)
-    print(
-        f"\nточка: {point.name!r}, грань: {direction.source}, "
-        f"нормаль: ({normal[0]:.3f}, {normal[1]:.3f}, {normal[2]:.3f})"
-    )
-    if direction.warning:
-        print("  !", direction.warning)
+    if args.normal:
+        direction = picking.face_at_point(
+            env, app, model, point.coords, geometry.mm(args.tolerance)
+        )
+        if direction is None:
+            print("\nне нашёл грань через эту точку — направление определить нечем")
+            return 1
+        normal = direction.normal
+        if args.inside:
+            normal = geometry.mul(normal, -1.0)
+        axes = geometry.frame_from_normal(normal)
+        print(
+            f"\nточка: {point.name!r}, грань: {direction.source}, "
+            f"нормаль: ({normal[0]:.3f}, {normal[1]:.3f}, {normal[2]:.3f})"
+        )
+        if direction.warning:
+            print("  !", direction.warning)
+    else:
+        axes = geometry.GLOBAL_AXES
+        print(f"\nточка: {point.name!r}, ориентация: оси детали (без проворота)")
 
     created = model.create_triplet(
         base_name=args.name,

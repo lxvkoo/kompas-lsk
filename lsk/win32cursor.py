@@ -15,6 +15,8 @@ user32.GetCursorPos.argtypes = (ctypes.POINTER(wintypes.POINT),)
 user32.GetCursorPos.restype = wintypes.BOOL
 user32.ScreenToClient.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.POINT))
 user32.ScreenToClient.restype = wintypes.BOOL
+user32.GetClientRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
+user32.GetClientRect.restype = wintypes.BOOL
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
 
@@ -26,6 +28,20 @@ def cursor_client_pos(hwnd: int) -> tuple[int, int]:
         return (-1, -1)
     if not user32.ScreenToClient(wintypes.HWND(hwnd), ctypes.byref(point)):
         return (-1, -1)
+    return (point.x, point.y)
+
+
+def client_size(hwnd: int) -> tuple[int, int]:
+    """Размер клиентской области окна (в ней же работают оконные координаты КОМПАСа)."""
+    rect = wintypes.RECT()
+    if not user32.GetClientRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+        return (0, 0)
+    return (rect.right - rect.left, rect.bottom - rect.top)
+
+
+def client_to_screen(hwnd: int, x: int, y: int) -> tuple[int, int]:
+    point = wintypes.POINT(x, y)
+    user32.ClientToScreen(wintypes.HWND(hwnd), ctypes.byref(point))
     return (point.x, point.y)
 
 

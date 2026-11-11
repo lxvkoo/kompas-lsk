@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from lsk import kompas  # noqa: E402
 
-MM = 0.001
+MM = 1.0  # единицы API КОМПАСа — миллиметры
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 

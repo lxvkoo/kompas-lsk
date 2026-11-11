@@ -80,8 +80,10 @@ def pixel_size_mm(env, model) -> float:
     frame = model.doc.GetDocumentFrame()
     if not frame:
         return 15.0
-    left, top, right, bottom = frame.GetWorkAreaRect(0, 0, 0, 0)
-    cx, cy = (left + right) // 2, (top + bottom) // 2
+    from . import win32cursor
+
+    width, height = win32cursor.client_size(frame.GetWindowHandle())
+    cx, cy = (width // 2 if width else 600), (height // 2 if height else 400)
     probes = []
     for dx, dy in ((0, 0), (120, 0), (0, 120)):
         ok, px, py, pz, _zx, _zy, _zz = frame.GetPickRay(
@@ -159,7 +161,7 @@ def face_at_point(env, app, model, point: geometry.Vec, tolerance: float) -> Dir
     warning = ""
     if dist > tolerance:
         warning = (
-            f"точка не лежит на грани (ближайшая в {dist / 0.001:.2f} мм) — "
+            f"точка не лежит на грани (ближайшая в {geometry.to_mm(dist):.2f} мм) — "
             "направление взято по ней. Точку лучше ставить на поверхность."
         )
     return Direction(normal=normal, distance=dist, source=face_kind(face), face=face,
@@ -211,3 +213,80 @@ def face_kind(face) -> str:
         except Exception:
             continue
     return "грань"
+
+def _solve3(matrix, rhs):
+    """Решение системы 3x3 методом Гаусса (без numpy)."""
+    m = [list(row) + [rhs[i]] for i, row in enumerate(matrix)]
+    for col in range(3):
+        pivot = max(range(col, 3), key=lambda r: abs(m[r][col]))
+        if abs(m[pivot][col]) < 1e-12:
+            return None
+        m[col], m[pivot] = m[pivot], m[col]
+        lead = m[col][col]
+        for j in range(col, 4):
+            m[col][j] /= lead
+        for row in range(3):
+            if row == col:
+                continue
+            factor = m[row][col]
+            for j in range(col, 4):
+                m[row][j] -= factor * m[col][j]
+    return m[0][3], m[1][3], m[2][3]
+
+
+def pixel_for_point(env, model, target: geometry.Vec, iterations: int = 3) -> tuple[int, int] | None:
+    """Пиксель клиентской области, луч из которого проходит через 3D-точку.
+
+    Нужно для тестов и подсказок. `UnConvertCoordinates` даёт только грубое
+    приближение (и Y у него считается от нижней границы окна), поэтому уточняем
+    численно по самому лучу: решаем P(px,py) + t·n = target.
+    """
+    from . import win32cursor
+
+    frame = model.doc.GetDocumentFrame()
+    if not frame:
+        return None
+    hwnd = frame.GetWindowHandle()
+    width, height = win32cursor.client_size(hwnd)
+    if width <= 0 or height <= 0:
+        return None
+
+    ok, px, py = frame.UnConvertCoordinates(1, target[0], target[1], target[2], 0, 0)
+    guess = (float(px), float(height - py)) if ok else (width / 2.0, height / 2.0)
+
+    def ray_at_pixel(x, y):
+        ok_r, ox, oy, oz, dx, dy, dz = frame.GetPickRay(
+            int(round(x)), int(round(y)), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        )
+        if not ok_r or geometry.length((dx, dy, dz)) < 1e-12:
+            return None
+        return (ox, oy, oz), geometry.normalize((dx, dy, dz))
+
+    step = 60.0
+    for _ in range(max(1, iterations)):
+        base = ray_at_pixel(*guess)
+        if base is None:
+            return None
+        p0, normal = base
+        probe_x = ray_at_pixel(guess[0] + step, guess[1])
+        probe_y = ray_at_pixel(guess[0], guess[1] + step)
+        if probe_x is None or probe_y is None:
+            return None
+        u = geometry.mul(geometry.sub(probe_x[0], p0), 1.0 / step)
+        v = geometry.mul(geometry.sub(probe_y[0], p0), 1.0 / step)
+        solution = _solve3(
+            [
+                [u[0], v[0], -normal[0]],
+                [u[1], v[1], -normal[1]],
+                [u[2], v[2], -normal[2]],
+            ],
+            geometry.sub(target, p0),
+        )
+        if solution is None:
+            return None
+        dx_pixel, dy_pixel, _t = solution
+        guess = (guess[0] + dx_pixel, guess[1] + dy_pixel)
+        if abs(dx_pixel) < 0.5 and abs(dy_pixel) < 0.5:
+            break
+
+    return int(round(guess[0])), int(round(guess[1]))

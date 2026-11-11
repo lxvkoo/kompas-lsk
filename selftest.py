@@ -12,7 +12,7 @@ import sys
 from lsk import geometry, kompas
 from lsk.model import PartModel
 
-MM = 0.001
+MM = 1.0  # единицы API КОМПАСа — миллиметры
 FAILS: list[str] = []
 
 
@@ -31,7 +31,8 @@ def main() -> int:
     mtr = geometry.matrix_from_frame((1.0, 2.0, 3.0), axes)
     check("матрица: 16 чисел", len(mtr) == 16 and mtr[15] == 1.0)
     check("матрица: начало координат", mtr[12:15] == [1.0, 2.0, 3.0])
-    check("мм в метры", geometry.mm(10) == 0.01)
+    check("мм -> единицы API", geometry.mm(10) == 10.0 * geometry.UNITS_PER_MM)
+    check("обратно в мм", geometry.to_mm(geometry.mm(10)) == 10.0)
     dist, _t = geometry.distance_to_ray((0.0, 0.0, 0.5), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
     check("расстояние до луча", dist < 1e-12, f"{dist}")
 

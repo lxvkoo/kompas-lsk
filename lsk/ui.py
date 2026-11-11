@@ -74,21 +74,29 @@ class Panel:
         settings = ttk.LabelFrame(outer, text="Направления для выбранного имени", padding=6)
         settings.grid(row=3, column=0, sticky="we", **pad)
 
-        ttk.Label(settings, text="Векторная ЛСК (_V):").grid(row=0, column=0, sticky="w")
+        self.no_rotation = tk.BooleanVar(value=self.cfg.orientation != "normal")
+        ttk.Checkbutton(
+            settings,
+            text="Без проворота (оси как у детали)",
+            variable=self.no_rotation,
+            command=self._on_orientation,
+        ).grid(row=0, column=0, columnspan=3, sticky="w")
+
+        ttk.Label(settings, text="Векторная ЛСК (_V):").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.v_sign = tk.IntVar(value=self.cfg.preset.v_sign)
         ttk.Radiobutton(
-            settings, text="наружу", value=1, variable=self.v_sign, command=self._on_direction
-        ).grid(row=0, column=1, sticky="w")
+            settings, text="+Y", value=1, variable=self.v_sign, command=self._on_direction
+        ).grid(row=1, column=1, sticky="w", pady=(6, 0))
         ttk.Radiobutton(
-            settings, text="внутрь", value=-1, variable=self.v_sign, command=self._on_direction
-        ).grid(row=0, column=2, sticky="w")
+            settings, text="−Y", value=-1, variable=self.v_sign, command=self._on_direction
+        ).grid(row=1, column=2, sticky="w", pady=(6, 0))
 
         ttk.Label(settings, text="Ось ЛСК поворота (_R):").grid(
-            row=1, column=0, sticky="w", pady=(6, 0)
+            row=2, column=0, sticky="w", pady=(6, 0)
         )
         self.r_axis = tk.StringVar(value=self.cfg.preset.r_axis)
         axes = ttk.Frame(settings)
-        axes.grid(row=1, column=1, columnspan=2, sticky="w", pady=(6, 0))
+        axes.grid(row=2, column=1, columnspan=2, sticky="w", pady=(6, 0))
         for i, axis in enumerate(config_mod.R_AXES):
             ttk.Radiobutton(
                 axes, text=axis, value=axis, variable=self.r_axis, command=self._on_direction
@@ -166,6 +174,15 @@ class Panel:
         preset = self.cfg.preset
         self.v_sign.set(preset.v_sign)
         self.r_axis.set(preset.r_axis)
+
+    def _on_orientation(self) -> None:
+        self.cfg.orientation = "global" if self.no_rotation.get() else "normal"
+        self.cfg.save()
+        self.log(
+            "Ориентация ЛСК: оси детали (без проворота)"
+            if self.cfg.orientation == "global"
+            else "Ориентация ЛСК: по нормали грани в точке"
+        )
 
     def _on_direction(self) -> None:
         preset = self.cfg.preset
