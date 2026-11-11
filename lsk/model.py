@@ -254,43 +254,51 @@ class PartModel:
         self,
         base_name: str,
         origin: geometry.Vec,
-        axes: tuple[geometry.Vec, geometry.Vec, geometry.Vec],
+        v_axis: geometry.Vec,
+        r_axis: geometry.Vec,
         offset: float,
-        v_sign: int,
-        r_axis: str,
         show_name: bool = True,
     ) -> Created:
         """Создать три ЛСК: базовую, векторную (`_V`) и поворота (`_R`).
 
-        origin — метры, offset — метры.
+        Ориентация у всех трёх — оси детали (без проворота), меняются только
+        координаты: `_V` смещена по `v_axis`, `_R` по `r_axis` на `offset`.
+        Всё создание обёрнуто в контейнер отмены, поэтому штатный Ctrl+Z в
+        КОМПАСе убирает тройку одним шагом.
         """
-        x, y, z = axes
-        v_origin = geometry.add(origin, geometry.mul(y, offset * (1 if v_sign >= 0 else -1)))
-        r_origin = geometry.add(origin, geometry.mul(geometry.axis_vector(axes, r_axis), offset))
-
         plan = [
             (base_name, origin),
-            (base_name + "_V", v_origin),
-            (base_name + "_R", r_origin),
+            (base_name + "_V", geometry.add(origin, geometry.mul(v_axis, offset))),
+            (base_name + "_R", geometry.add(origin, geometry.mul(r_axis, offset))),
         ]
-        matrix = [geometry.matrix_from_frame(o, (x, y, z)) for _n, o in plan]
+        matrices = [geometry.matrix_from_frame(o, geometry.GLOBAL_AXES) for _n, o in plan]
 
         names: list[str] = []
-        for (name, _origin), mtr in zip(plan, matrix):
-            lcs = self._new_lcs()
-            lcs.SetName(name)
-            if not lcs.InitByMatrix3D(mtr):
-                raise KompasModelError(f"КОМПАС отказался задать матрицу для «{name}»")
-            if show_name and self.env.features.show_name:
-                try:
-                    lcs.SetShowName(True)
-                except Exception:
-                    pass
-            lcs.Update()
-            names.append(name)
-
+        self._undo_container(True)
+        try:
+            for (name, _origin), mtr in zip(plan, matrices):
+                lcs = self._new_lcs()
+                lcs.SetName(name)
+                if not lcs.InitByMatrix3D(mtr):
+                    raise KompasModelError(f"КОМПАС отказался задать матрицу для «{name}»")
+                if show_name and self.env.features.show_name:
+                    try:
+                        lcs.SetShowName(True)
+                    except Exception:
+                        pass
+                lcs.Update()
+                names.append(name)
+        finally:
+            self._undo_container(False)
         self.rebuild()
         return Created(names=names)
+
+    def _undo_container(self, begin: bool) -> None:
+        """Сгруппировать изменения в один шаг отмены (Ctrl+Z)."""
+        try:
+            self.doc3d.SetUndoContainer(begin)
+        except Exception:
+            pass
 
     def rebuild(self, redraw: bool = True) -> None:
         try:
@@ -314,10 +322,13 @@ class PartModel:
                 objs.append(obj)
         if not objs:
             return 0
+        self._undo_container(True)
         try:
             self.doc.Delete(objs)
         except Exception as exc:
             raise KompasModelError(f"Не удалось удалить ЛСК: {exc}") from exc
+        finally:
+            self._undo_container(False)
         self.rebuild()
         return len(objs)
 

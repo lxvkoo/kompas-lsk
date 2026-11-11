@@ -83,35 +83,51 @@ def main() -> int:
         frame.ZoomPrevNextOrAll(env.constants.ksZoomAll)
         frame.RefreshWindow()
 
+        # ZoomPrevNextOrAll в v25 анимирован: ждём, пока вид перестанет ехать
+        import time as _time
+
+        model_wait = PartModel(env, app).attach(doc)
+        last = None
+        for _ in range(50):
+            current = picking.point_to_pixel(env, model_wait, POINT)
+            if current is not None and current == last:
+                break
+            last = current
+            _time.sleep(0.1)
+
         hwnd = frame.GetWindowHandle()
         width, height = win32cursor.client_size(hwnd)
 
         model_for_ray = PartModel(env, app).attach(doc)
-        found = picking.pixel_for_point(env, model_for_ray, POINT)
+        found = picking.point_to_pixel(env, model_for_ray, POINT)
         check("пиксель точки найден", found is not None, str(found))
         if found is None:
             return 1
         wx, wy = found
         check("пиксель внутри окна", 0 <= wx < width and 0 <= wy < height,
               f"({wx}, {wy}) при окне {width}x{height}")
-        ray = picking.ray_at(env, model_for_ray, wx, wy)
-        if ray is None:
-            check("луч взгляда получен", False, f"пиксель ({wx}, {wy})")
-            return 1
-        dist, _t = geometry.distance_to_ray(POINT, ray.origin, ray.direction)
-        check("луч проходит через точку", dist < 1.0, f"расстояние {dist:.4f} мм")
+
+        points_now = model_for_ray.points()
+        snap = picking.snap_to_point(env, model_for_ray, points_now, (wx, wy), 10.0)
+        check("привязка находит точку по пикселю", snap is not None,
+              f"точек {len(points_now)}, расстояние {snap.distance_px:.1f} px" if snap else "нет")
+        scale = picking.mm_per_pixel(env, model_for_ray, POINT)
+        check("масштаб вида разумен", 0.001 < scale < 5.0, f"{scale:.3f} мм/px")
 
         screen = win32cursor.client_to_screen(hwnd, wx, wy)
         user32.SetCursorPos(screen[0], screen[1])
         check("курсор поставлен в точку", True, f"экран {screen}")
 
+        # куда тянуть: пиксель точки, смещённой на 10 мм по +Y
+        drag_to = picking.point_to_pixel(env, model_for_ray, (POINT[0], POINT[1] + 10 * MM, POINT[2]))
+        check("пиксель направления +Y найден", drag_to is not None, str(drag_to))
+
         cfg = config_mod.Config(
-            presets=[config_mod.Preset(NAME, r_axis="+X", v_sign=1)],
+            presets=[config_mod.Preset(NAME, last_axis="+Y")],
             offset_mm=OFFSET,
             snap_tol_mm=3.0,
             snap_tol_px=10.0,
             show_name=True,
-            orientation="global",  # без проворота
             active=0,
         )
         logs: list[str] = []
@@ -122,8 +138,29 @@ def main() -> int:
             log=lambda t: (logs.append(t), print("   >", t, flush=True)),
             confirm_duplicates=lambda names: True,
         )
-        result = placer.place_under_cursor()
-        check("place_under_cursor выполнился", result, " | ".join(logs[-2:]))
+        # все шесть направлений должны распознаваться протяжкой
+        base_px = picking.point_to_pixel(env, model_for_ray, POINT)
+        wrong = []
+        for name, vec in picking.AXIS_VECTORS.items():
+            target_px = picking.point_to_pixel(
+                env, model_for_ray,
+                (POINT[0] + vec[0] * 10, POINT[1] + vec[1] * 10, POINT[2] + vec[2] * 10),
+            )
+            if target_px is None:
+                wrong.append(f"{name}: нет пикселя")
+                continue
+            guess = picking.axis_from_drag(env, model_for_ray, POINT, base_px, target_px)
+            if guess is None or guess[0] != name:
+                wrong.append(f"{name} -> {guess[0] if guess else None}")
+        check("все 6 направлений распознаются", not wrong, ", ".join(wrong) or "ок")
+
+        placer.on_press()                      # «зажал клавишу» в точке
+        drag_screen = win32cursor.client_to_screen(hwnd, *drag_to)
+        user32.SetCursorPos(drag_screen[0], drag_screen[1])
+        check("курсор перетащен в сторону +Y", True, f"экран {drag_screen}")
+        placer.on_release()                    # «отпустил клавишу»
+        result = bool(logs) and "мм;" in logs[-1]
+        check("place выполнился", result, " | ".join(logs[-2:]))
         if not result:
             return 1
 
@@ -145,7 +182,7 @@ def main() -> int:
             str([round(v / MM, 3) for v in (vec.GetX(), vec.GetY(), vec.GetZ())]),
         )
         check(
-            "поворотная +10 мм по X",
+            "_R перпендикулярна _V (+X при _V по +Y)",
             near((rot.GetX(), rot.GetY(), rot.GetZ()), (POINT[0] + OFFSET * MM, POINT[1], POINT[2])),
             str([round(v / MM, 3) for v in (rot.GetX(), rot.GetY(), rot.GetZ())]),
         )
@@ -154,8 +191,12 @@ def main() -> int:
         ok_vec = base.GetVector(env.constants3d.o3d_axisOX, 0.0, 0.0, 0.0)
         check("ось X базовой ЛСК = (1,0,0)", ok_vec[0] and near(ok_vec[1:], (1.0, 0.0, 0.0), 1e-6), str(ok_vec))
 
-        placer.undo_last()
-        check("тройка удалена", model.list_lcs() == [], str(model.list_lcs()))
+        # штатный Ctrl+Z КОМПАСа должен убрать всю тройку одним шагом
+        app.ExecuteKompasCommand(57643, False)  # ksCMEditUndo
+        import time as _time
+
+        _time.sleep(0.6)
+        check("Ctrl+Z убирает всю тройку", model.list_lcs() == [], str(model.list_lcs()))
     finally:
         doc.Close(0)
 

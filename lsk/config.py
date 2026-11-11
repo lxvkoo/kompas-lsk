@@ -10,8 +10,6 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-R_AXES = ("+X", "-X", "+Z", "-Z")
-
 DEFAULT_NAMES = (
     "ЛСК_Т03",
     "ЛСК_БКН",
@@ -20,14 +18,16 @@ DEFAULT_NAMES = (
     "ЛСК_Т01",
 )
 
+#: направления векторной ЛСК, которые можно выбрать протяжкой мышью
+AXES = ("+X", "-X", "+Y", "-Y", "+Z", "-Z")
+
 
 @dataclass
 class Preset:
-    """Имя ЛСК + запомненные для него настройки направления."""
+    """Имя ЛСК + последнее выбранное направление (если потянуть мышью не вышло)."""
 
     name: str
-    r_axis: str = "+X"   # куда смещается ЛСК поворота: +X/-X/+Z/-Z в базовой системе
-    v_sign: int = 1      # +1 — векторная ЛСК наружу по нормали, -1 — внутрь
+    last_axis: str = "+Y"
 
 
 @dataclass
@@ -37,8 +37,8 @@ class Config:
     snap_tol_mm: float = 3.0       # минимум допуска привязки к 3D-точке модели
     snap_tol_px: float = 10.0      # и то же в пикселях экрана (зависит от масштаба вида)
     show_name: bool = True         # включать «Показывать надпись» у ЛСК
-    orientation: str = "global"    # "global" — без проворота (оси детали), "normal" — по нормали грани
     hotkey: str = "Ctrl+1"
+    drag_threshold_px: float = 12.0  # меньше этого движение считается «нажатием»
     active: int = 0                # индекс выбранного пресета
 
     # --- доступ к текущему пресету -------------------------------------
@@ -66,8 +66,7 @@ class Config:
             presets = [
                 Preset(
                     name=str(p.get("name", "")).strip() or "ЛСК",
-                    r_axis=str(p.get("r_axis", "+X")),
-                    v_sign=1 if int(p.get("v_sign", 1)) >= 0 else -1,
+                    last_axis=str(p.get("last_axis", "+Y")),
                 )
                 for p in raw.get("presets", [])
             ]
@@ -77,16 +76,14 @@ class Config:
                 snap_tol_mm=float(raw.get("snap_tol_mm", 3.0)),
                 snap_tol_px=float(raw.get("snap_tol_px", 10.0)),
                 show_name=bool(raw.get("show_name", True)),
-                orientation=str(raw.get("orientation", "global")),
                 hotkey=str(raw.get("hotkey", "Ctrl+1")),
+                drag_threshold_px=float(raw.get("drag_threshold_px", 12.0)),
                 active=int(raw.get("active", 0)),
             )
-            for p in cfg.presets:  # защита от опечаток в файле
-                if p.r_axis.upper() not in R_AXES:
-                    p.r_axis = "+X"
-            if cfg.orientation not in ("global", "normal"):
-                cfg.orientation = "global"
-            if cfg.hotkey.upper() in ("CTRL+ALT+L", "CTRL+ALT+L".upper()):
+            for preset in cfg.presets:
+                if preset.last_axis.upper() not in AXES:
+                    preset.last_axis = "+Y"
+            if cfg.hotkey.upper() == "CTRL+ALT+L":
                 cfg.hotkey = "Ctrl+1"  # старое значение по умолчанию
             return cfg
         except (TypeError, ValueError):
@@ -96,7 +93,8 @@ class Config:
         path = path or self.path()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            data = asdict(self)
-            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            path.write_text(
+                json.dumps(asdict(self), ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except OSError:
             pass  # не критично: настройки просто не сохранятся

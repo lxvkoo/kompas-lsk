@@ -65,8 +65,10 @@ def main() -> int:
         check("координаты точек верные", read_points[1].coords == (20 * MM, 30 * MM, 5 * MM))
 
         base = "Самотест_ЛСК"
-        rect = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
-        model.create_triplet(base, (0.0, 0.0, 0.0), rect, 10 * MM, 1, "+X", show_name=True)
+        create = lambda name, origin, axis, perpendicular, offset=10 * MM: model.create_triplet(
+            name, origin, axis, perpendicular, offset, show_name=True
+        )
+        create(base, (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 0.0, 0.0))
 
         names = model.list_lcs()
         check("созданы три ЛСК", all(f"{base}{s}" in names for s in ("", "_V", "_R")), f"{names}")
@@ -87,12 +89,11 @@ def main() -> int:
             str((lcs_r.GetX() / MM, lcs_r.GetY() / MM, lcs_r.GetZ() / MM)),
         )
 
-        # повёрнутая система: нормаль +Z (деталь «стоит» на торце)
-        rotated = geometry.frame_from_normal((0.0, 0.0, 1.0))
-        model.create_triplet("Самотест_поворот", (0.0, 0.0, 0.0), rotated, 10 * MM, 1, "+Z")
+        # смещение вдоль Z: точки «стоит на торце»
+        create("Самотест_поворот", (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), (1.0, 0.0, 0.0))
         lcs_v2 = model.lcs_by_name("Самотест_поворот_V")
         check(
-            "векторная при нормали +Z -> (0, 0, 10) мм",
+            "векторная вдоль +Z -> (0, 0, 10) мм",
             _near((lcs_v2.GetX(), lcs_v2.GetY(), lcs_v2.GetZ()), (0.0, 0.0, 10 * MM)),
             str((lcs_v2.GetX() / MM, lcs_v2.GetY() / MM, lcs_v2.GetZ() / MM)),
         )
