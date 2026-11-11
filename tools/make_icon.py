@@ -60,13 +60,43 @@ def _render(source: Image.Image, size: int) -> Image.Image:
     return image
 
 
+def _bmp_entry(image: Image.Image) -> bytes:
+    """Запись .ico в формате DIB (BMP): так его понимают Проводник и Tk.
+
+    PNG-блоки внутри .ico Windows показывает только для 256x256, поэтому мелкие
+    размеры пишем как классический 32-битный BMP с AND-маской.
+    """
+    size = image.width
+    pixels = image.convert("RGBA").load()
+    header = struct.pack("<IiiHHIIiiII", 40, size, size * 2, 1, 32, 0, 0, 0, 0, 0, 0)
+    rows = bytearray()
+    for y in range(size - 1, -1, -1):  # снизу вверх
+        for x in range(size):
+            r, g, b, a = pixels[x, y]
+            rows += bytes((b, g, r, a))
+    mask_row = ((size + 31) // 32) * 4
+    mask = bytearray()
+    for y in range(size - 1, -1, -1):  # маска прозрачности, 1 бит на пиксель
+        bits = bytearray(mask_row)
+        for x in range(size):
+            if pixels[x, y][3] == 0:
+                bits[x // 8] |= 0x80 >> (x % 8)
+        mask += bits
+    return header + bytes(rows) + bytes(mask)
+
+
 def _write_ico(images: dict[int, Image.Image], path: Path) -> None:
-    """Собрать .ico вручную: каждая запись — PNG (поддерживается с Windows Vista)."""
+    """Собрать .ico: BMP-блоки для размеров <= 64, PNG для 128/256."""
     entries: list[tuple[int, bytes]] = []
     for size in sorted(images):
-        buffer = io.BytesIO()
-        images[size].save(buffer, format="PNG", optimize=True)
-        entries.append((size, buffer.getvalue()))
+        image = images[size]
+        if size >= 128:
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG", optimize=True)
+            data = buffer.getvalue()
+        else:
+            data = _bmp_entry(image)
+        entries.append((size, data))
 
     header = struct.pack("<HHH", 0, 1, len(entries))
     offset = 6 + 16 * len(entries)
