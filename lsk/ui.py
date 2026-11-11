@@ -13,6 +13,7 @@ from tkinter import messagebox, simpledialog, ttk
 
 from . import config as config_mod
 from .hotkey import KeyWatcher, parse_hotkey
+from .overlay import DirectionOverlay
 from .session import Placer
 
 TITLE = "ЛСК → КОМПАС"
@@ -48,9 +49,10 @@ class Panel:
             confirm_duplicates=self._confirm_duplicates,
         )
 
+        self._overlay = DirectionOverlay(self.root)
         self._build()
         self._start_watcher()
-        self.root.after(60, self._tick)
+        self.root.after(50, self._tick)
 
     # ------------------------------------------------------------------ UI
     def _build(self) -> None:
@@ -125,6 +127,7 @@ class Panel:
         self.root.mainloop()
 
     def _on_close(self) -> None:
+        self._overlay.hide()
         self._watcher.stop()
         self._on_numbers()
         self.cfg.save()
@@ -229,6 +232,15 @@ class Panel:
         elif self._watcher.error:
             self.log(self._watcher.error)
 
+    def _refresh_overlay(self) -> None:
+        """Показать/обновить стрелку-подсказку во время протяжки."""
+        preview = self.placer.preview()
+        if preview is None:
+            self._overlay.hide()
+            return
+        anchor, direction, label = preview
+        self._overlay.show_at(anchor, direction, label)
+
     def _apply_hotkey(self) -> None:
         spec = self.hotkey_var.get().strip()
         if parse_hotkey(spec) is None:
@@ -249,6 +261,10 @@ class Panel:
                 break
             if event == "press":
                 self.placer.on_press()
+                self._refresh_overlay()
             else:
+                self._overlay.hide()
                 self.placer.on_release()
-        self.root.after(60, self._tick)
+        if self.placer.state is not None:
+            self._refresh_overlay()
+        self.root.after(50, self._tick)

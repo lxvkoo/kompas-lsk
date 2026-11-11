@@ -106,37 +106,51 @@ def snap_to_point(env, model, points, cursor: tuple[int, int],
     return best
 
 
-def axis_from_drag(env, model, origin: geometry.Vec, start_px, end_px,
-                   probe_mm: float = 10.0) -> tuple[str, float] | None:
-    """Какая из шести осей детали соответствует протяжке мышью.
-
-    Возвращает (имя оси, косинус угла с протяжкой) или None, если непонятно.
-    """
-    dx = end_px[0] - start_px[0]
-    dy = end_px[1] - start_px[1]
-    if dx == 0 and dy == 0:
-        return None
-    drag = geometry.normalize((float(dx), float(dy), 0.0))
-
+def axis_screen_vectors(env, model, origin: geometry.Vec,
+                        probe_mm: float = 10.0) -> dict[str, tuple[float, float]]:
+    """Экранные направления шести осей детали из данной точки (в пикселях)."""
     base = point_to_pixel(env, model, origin)
     if base is None:
-        return None
-
-    best: tuple[float, str] | None = None
+        return {}
+    result: dict[str, tuple[float, float]] = {}
     for name, vec in AXIS_VECTORS.items():
         target = geometry.add(origin, geometry.mul(vec, probe_mm))
         pixel = point_to_pixel(env, model, target)
         if pixel is None:
             continue
-        screen = (float(pixel[0] - base[0]), float(pixel[1] - base[1]), 0.0)
-        if geometry.length(screen) < 4.0:  # ось смотрит в камеру
+        dx = float(pixel[0] - base[0])
+        dy = float(pixel[1] - base[1])
+        if (dx * dx + dy * dy) ** 0.5 < 4.0:  # ось смотрит в камеру
             continue
-        cosine = geometry.dot(geometry.normalize(screen), drag)
+        result[name] = (dx, dy)
+    return result
+
+
+def best_axis(drag: tuple[float, float], vectors: dict[str, tuple[float, float]],
+              min_cosine: float = 0.3) -> tuple[str, float] | None:
+    """Ближайшая к протяжке ось по косинусу угла между экранными направлениями."""
+    length = (drag[0] ** 2 + drag[1] ** 2) ** 0.5
+    if length < 1e-9 or not vectors:
+        return None
+    unit = (drag[0] / length, drag[1] / length)
+    best: tuple[float, str] | None = None
+    for name, vec in vectors.items():
+        vec_length = (vec[0] ** 2 + vec[1] ** 2) ** 0.5
+        if vec_length < 1e-9:
+            continue
+        cosine = (unit[0] * vec[0] + unit[1] * vec[1]) / vec_length
         if best is None or cosine > best[0]:
             best = (cosine, name)
-    if best is None or best[0] < 0.3:
+    if best is None or best[0] < min_cosine:
         return None
     return best[1], best[0]
+
+
+def axis_from_drag(env, model, origin: geometry.Vec, start_px, end_px,
+                   probe_mm: float = 10.0) -> tuple[str, float] | None:
+    """Какая из шести осей детали соответствует протяжке мышью."""
+    vectors = axis_screen_vectors(env, model, origin, probe_mm)
+    return best_axis((float(end_px[0] - start_px[0]), float(end_px[1] - start_px[1])), vectors)
 
 
 def perpendicular_axis(axis_name: str) -> str:

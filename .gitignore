@@ -7,3 +7,4 @@ dist/
 *.spec
 *.log
 .probe_out*
+_overlay_shot.png

@@ -39,6 +39,14 @@ def client_size(hwnd: int) -> tuple[int, int]:
     return (rect.right - rect.left, rect.bottom - rect.top)
 
 
+def cursor_screen_pos() -> tuple[int, int] | None:
+    """Позиция курсора в экранных координатах."""
+    point = wintypes.POINT()
+    if not user32.GetCursorPos(ctypes.byref(point)):
+        return None
+    return (point.x, point.y)
+
+
 def client_to_screen(hwnd: int, x: int, y: int) -> tuple[int, int]:
     point = wintypes.POINT(x, y)
     user32.ClientToScreen(wintypes.HWND(hwnd), ctypes.byref(point))
