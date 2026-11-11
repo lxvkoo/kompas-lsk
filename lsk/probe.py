@@ -38,6 +38,16 @@ def build_report(env, app=None) -> str:
     lines.append("")
     lines.append(env.features.as_text())
 
+    lib = getattr(env.ksapi, "ksapi", None)
+    missing = sorted(getattr(lib, "missing", set()) or [])
+    if missing:
+        lines.append("")
+        lines.append(f"В DLL этой версии нет {len(missing)} функций из Python-обёртки:")
+        for name in missing[:60]:
+            lines.append(f"  - {name}")
+        if len(missing) > 60:
+            lines.append(f"  ... и ещё {len(missing) - 60}")
+
     doc = app.GetActiveDocument()
     if doc is None:
         lines.append("")

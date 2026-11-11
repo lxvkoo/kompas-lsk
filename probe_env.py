@@ -56,7 +56,11 @@ def main() -> int:
     try:
         env = kompas.load()
     except kompas.KompasNotFound as exc:
-        print("КОМПАС не найден.")
+        from lsk.probe import LINE
+
+        print(LINE)
+        print("Диагностика: Python-обёртка API КОМПАСа не найдена")
+        print(LINE)
         print(exc)
         return 2
     print(build_report(env))

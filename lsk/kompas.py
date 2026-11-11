@@ -73,17 +73,105 @@ def _candidate_bin_dirs() -> list[str]:
     return seen
 
 
+def bin_inventory(bin_dir: str | Path) -> list[str]:
+    """Что из файлов API есть в каталоге Bin (для диагностики)."""
+    path = Path(bin_dir)
+    if not path.is_dir():
+        return [f"{path} — каталога нет"]
+    found: list[str] = []
+    for pattern in ("*.py", "ks*.dll", "kAPI*", "*.tlb"):
+        for hit in sorted(path.glob(pattern)):
+            if hit.name not in found:
+                found.append(hit.name)
+    for sub in ("SDK", "Include", "Samples", "Python"):
+        if (path / sub).is_dir():
+            found.append(f"[каталог {sub}]")
+    return found or ["(ничего похожего на API не найдено)"]
+
+
 def find_bin_dir() -> str:
     """Каталог `Bin` установленного КОМПАСа, в котором есть ksapi.py."""
     tried: list[str] = []
     for path in _candidate_bin_dirs():
+        if path in tried:
+            continue
         tried.append(path)
         if Path(path, "ksapi.py").is_file() and Path(path, "constants.py").is_file():
             return path
-    raise KompasNotFound(
-        "Не найден КОМПАС-3D с Python-обёрткой API (ksapi.py в каталоге Bin).\n"
-        "Проверено:\n  " + "\n  ".join(tried or ["—"])
+
+    lines = [
+        "Не найден КОМПАС-3D с Python-обёрткой API (ksapi.py в каталоге Bin).",
+        "",
+        "Проверено:",
+    ]
+    for path in tried or ["—"]:
+        lines.append(f"  {path}")
+        if Path(path).is_dir():
+            lines.append("    есть: " + ", ".join(bin_inventory(path)[:14]))
+    lines.append("")
+    has_link = any(
+        Path(path, "ksAPICLink.dll").is_file() for path in tried if Path(path).is_dir()
     )
+    if has_link:
+        lines.append(
+            "В каталоге есть ksAPICLink.dll, но нет ksapi.py — это версия КОМПАСа, "
+            "где Python-обёртка не поставляется. Можно попробовать скопировать "
+            "ksapi.py, constants.py и constants3d.py из каталога Bin версии, где "
+            "инструмент уже работает (например, v25), в этот Bin."
+        )
+    lines.append(
+        "Если КОМПАС установлен, а ksapi.py в его Bin нет — значит эта версия "
+        "КОМПАСа не поставляет Python-обёртку API. Пришлите этот текст "
+        "разработчику (или запустите диагностику: lsk_probe.exe или кнопка "
+        "«Диагностика»)."
+    )
+    raise KompasNotFound("\n".join(lines))
+
+
+class ApiMissing(RuntimeError):
+    """Функция объявлена в Python-обёртке, но отсутствует в DLL этой версии КОМПАСа."""
+
+
+class _MissingFunction:
+    """Заглушка вместо отсутствующей функции DLL: объявляется, но не работает."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.restype = None
+        self.argtypes: list = []
+
+    def __call__(self, *args, **kwargs):
+        raise ApiMissing(
+            f"в этой версии КОМПАСа нет функции API «{self.name}» "
+            "(обёртка новее, чем DLL)"
+        )
+
+
+class _TolerantLib:
+    """Прокси над ctypes-библиотекой: отсутствующие символы не ломают импорт.
+
+    Обёртка `ksapi.py` при импорте обращается ко всем функциям DLL сразу.
+    Если версия DLL старше обёртки, часть имён отсутствует — раньше это
+    приводило к падению импорта. Теперь такие имена получают заглушку,
+    а список отсутствующих сохраняется в `missing`.
+    """
+
+    def __init__(self, lib):
+        self._lib = lib
+        self.missing: set[str] = set()
+
+    def __getattr__(self, name):
+        try:
+            return getattr(self._lib, name)
+        except AttributeError:
+            self.missing.add(name)
+            return _MissingFunction(name)
+
+
+def _lib_of(env_or_module):
+    """ctypes-обёртка библиотеки (с учётом прокси)."""
+    lib = getattr(env_or_module, "ksapi", env_or_module)
+    return getattr(lib, "ksapi", lib)
 
 
 def _load_module(name: str, path: Path):
@@ -162,7 +250,8 @@ class KompasEnv:
 def _detect_features(ksapi_module) -> Features:
     f = Features()
     lib = ksapi_module.ksapi
-    has = lambda name: hasattr(lib, name)
+    missing = getattr(lib, "missing", set())
+    has = lambda name: hasattr(lib, name) and name not in missing
     f.lcs_collection = has("IAuxiliaryGeomContainer_GetLocalCoordinateSystems") and has(
         "ILocalCoordinateSystems_Add"
     )
@@ -195,7 +284,39 @@ def load(bin_dir: str | None = None) -> KompasEnv:
 
     constants = _load_module("constants", path / "constants.py")
     constants3d = _load_module("constants3d", path / "constants3d.py")
-    ksapi = _load_module("ksapi", path / "ksapi.py")
+
+    # ksapi.py грузит ksAPICLink.dll и сразу обращается ко всем её функциям:
+    # оборачиваем LoadLibrary, чтобы отсутствующие имена не роняли импорт
+    import ctypes
+
+    original_load = ctypes.cdll.LoadLibrary
+    wrapped_holder: dict = {}
+
+    def tolerant_load(lib_path):
+        lib = original_load(lib_path)
+        wrapped = _TolerantLib(lib)
+        wrapped_holder["lib"] = wrapped
+        return wrapped
+
+    ctypes.cdll.LoadLibrary = tolerant_load
+    try:
+        ksapi = _load_module("ksapi", path / "ksapi.py")
+    except OSError as exc:
+        raise KompasNotFound(
+            f"Не удалось загрузить библиотеку API КОМПАСа из {path}:\n{exc}\n\n"
+            "Скорее всего в этой версии КОМПАСа нет ksAPICLink.dll — тогда нужен "
+            "другой способ работы с API (сообщите разработчику)."
+        ) from exc
+    finally:
+        ctypes.cdll.LoadLibrary = original_load
+
+    missing = sorted(wrapped_holder.get("lib").missing) if wrapped_holder.get("lib") else []
+    if missing:
+        print(
+            f"Внимание: в DLL этой версии КОМПАСа нет {len(missing)} функций из "
+            f"обёртки — соответствующие возможности будут недоступны.\n"
+            f"  первые: {', '.join(missing[:8])}"
+        )
 
     features = _detect_features(ksapi)
     return KompasEnv(
