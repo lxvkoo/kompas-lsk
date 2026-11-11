@@ -3,19 +3,17 @@
 Запуск:  python main.py
 Требуется запущенный КОМПАС-3D с открытой деталью (*.m3d).
 
-Служебные режимы (полезны в собранном exe, где нет консоли):
-    main.py --probe      диагностика окружения (пишет report.txt и открывает его)
+Служебные режимы (в exe без консоли отчёт пишется в файл и открывается):
+    main.py --probe      диагностика окружения
     main.py --selftest   автотест во временной детали
 """
 
 from __future__ import annotations
 
+import contextlib
 import io
-import os
-import subprocess
 import sys
 import traceback
-from pathlib import Path
 
 
 def _fix_streams() -> None:
@@ -24,13 +22,6 @@ def _fix_streams() -> None:
         sys.stdout = io.StringIO()
     if sys.stderr is None:
         sys.stderr = io.StringIO()
-
-
-def _app_dir() -> Path:
-    """Каталог рядом с exe (или с исходниками)."""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent
 
 
 def _fatal(message: str) -> int:
@@ -49,79 +40,23 @@ def _fatal(message: str) -> int:
     return 1
 
 
-def _save_and_show(text: str, filename: str, title: str) -> Path:
-    """Сохранить отчёт рядом с exe и открыть в блокноте (консоли может не быть)."""
-    path = _app_dir() / filename
-    try:
-        path.write_text(text, encoding="utf-8")
-    except OSError:
-        path = Path(os.environ.get("TEMP", ".")) / filename
-        path.write_text(text, encoding="utf-8")
-    print(f"\nОтчёт сохранён: {path}")
-    print(text)
-    try:
-        subprocess.Popen(["notepad.exe", str(path)])
-    except Exception:
-        pass
-    return path
-
-
 def _run_probe() -> int:
     """Диагностика окружения: версия КОМПАСа и доступные возможности API."""
     from lsk import kompas
+    from lsk.probe import build_report
+    from lsk.report import save_and_show
 
-    lines: list[str] = []
     try:
         env = kompas.load()
     except kompas.KompasNotFound as exc:
-        _fatal(f"КОМПАС не найден.\n\n{exc}")
-        return 2
-
-    lines.append(f"Python {sys.version.split()[0]} ({'64' if sys.maxsize > 2**32 else '32'}-bit)")
-    lines.append(f"Каталог Bin: {env.bin_dir}")
-
-    app = env.app()
-    if app is None:
-        lines.append("КОМПАС не запущен — запусти КОМПАС и повтори, тогда будет видна версия")
-    else:
-        env.refresh_version(app)
-        lines.append("")
-        lines.append(env.features.as_text())
-        doc = app.GetActiveDocument()
-        if doc is None:
-            lines.append("\nАктивный документ: нет")
-        else:
-            type_names = {
-                env.constants.ksDocumentDrawing: "Чертёж",
-                env.constants.ksDocumentFragment: "Фрагмент",
-                env.constants.ksDocumentPart: "Деталь",
-                env.constants.ksDocumentAssembly: "Сборка",
-                env.constants.ksDocumentTextual: "Текстовый документ",
-            }
-            doc_type = doc.GetDocumentType()
-            lines.append(f"\nАктивный документ: {type_names.get(doc_type, doc_type)}")
-            if doc_type == env.constants.ksDocumentPart:
-                try:
-                    from lsk.model import PartModel
-
-                    model = PartModel(env, app).refresh()
-                    lines.append(f"  коллекция ЛСК: {'да' if model.has_collection else 'НЕТ'}")
-                    lines.append(f"  ЛСК в модели: {len(model.list_lcs())}")
-                    try:
-                        lines.append(f"  3D-точек в модели: {len(model.points())}")
-                    except Exception as exc:
-                        lines.append(f"  3D-точки: ошибка — {exc}")
-                except Exception as exc:
-                    lines.append(f"  ошибка чтения модели: {exc}")
-
-    text = "\n".join(lines)
-    _save_and_show(text, "probe_report.txt", "Диагностика")
+        return _fatal(f"КОМПАС не найден.\n\n{exc}")
+    save_and_show(build_report(env), "probe_report.txt")
     return 0
 
 
 def _run_selftest() -> int:
     """Автотест: временная деталь, создание и удаление ЛСК."""
-    import contextlib
+    from lsk.report import save_and_show
 
     buffer = io.StringIO()
     try:
@@ -132,7 +67,7 @@ def _run_selftest() -> int:
     except Exception:
         buffer.write(traceback.format_exc())
         code = 1
-    _save_and_show(buffer.getvalue(), "selftest_report.txt", "Самотест")
+    save_and_show(buffer.getvalue(), "selftest_report.txt")
     return code
 
 

@@ -22,7 +22,7 @@ def check(name: str, condition: bool, detail: str = "") -> None:
     print(f"[{'ok ' if condition else 'FAIL'}] {name}" + (f" — {detail}" if detail else ""))
 
 
-def main() -> int:
+def main(env=None, app=None) -> int:
     print("=== 1. Геометрия (без КОМПАСа) ===")
     axes = geometry.frame_from_normal((0.0, 0.0, 1.0))
     check("базис из нормали +Z", axes[1] == (0.0, 0.0, 1.0), f"Y={axes[1]}")

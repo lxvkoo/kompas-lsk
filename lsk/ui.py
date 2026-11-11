@@ -128,9 +128,18 @@ class Panel:
             row=5, column=0, sticky="we", **pad
         )
 
-        ttk.Label(outer, text="Журнал:").grid(row=6, column=0, sticky="w", padx=6, pady=(6, 0))
+        service = ttk.Frame(outer)
+        service.grid(row=6, column=0, sticky="we", **pad)
+        ttk.Button(service, text="Диагностика", command=self._show_probe, width=16).pack(
+            side="left"
+        )
+        ttk.Button(service, text="Самотест", command=self._run_selftest, width=16).pack(
+            side="left", padx=6
+        )
+
+        ttk.Label(outer, text="Журнал:").grid(row=7, column=0, sticky="w", padx=6, pady=(6, 0))
         self.log_box = tk.Text(outer, height=8, width=50, state="disabled", wrap="word")
-        self.log_box.grid(row=7, column=0, sticky="we", **pad)
+        self.log_box.grid(row=8, column=0, sticky="we", **pad)
 
     # ------------------------------------------------------------- события
     def run(self) -> None:
@@ -281,6 +290,38 @@ class Panel:
             if self.hotkey_enabled.get()
             else "Инструмент выключен: клавиша не перехватывается, КОМПАС работает как обычно"
         )
+
+    def _show_probe(self) -> None:
+        """Отчёт о версии КОМПАСа и возможностях API (файл + блокнот)."""
+        from .probe import build_report
+        from .report import save_and_show
+
+        try:
+            text = build_report(self.env, self.app)
+        except Exception as exc:
+            self.log(f"Диагностика не удалась: {exc}")
+            return
+        path = save_and_show(text, "probe_report.txt")
+        self.log(f"Диагностика: отчёт {path}")
+
+    def _run_selftest(self) -> None:
+        """Автотест во временной детали (твои модели не затрагиваются)."""
+        import contextlib
+        import io
+
+        from .report import save_and_show
+
+        buffer = io.StringIO()
+        try:
+            import selftest
+
+            with contextlib.redirect_stdout(buffer):
+                code = selftest.main(self.env, self.app)
+        except Exception as exc:
+            self.log(f"Самотест не удался: {exc}")
+            return
+        path = save_and_show(buffer.getvalue(), "selftest_report.txt")
+        self.log(f"Самотест: {'успешно' if code == 0 else 'есть ошибки'}, отчёт {path}")
 
     def _refresh_overlay(self) -> None:
         """Показать/обновить стрелку-подсказку во время протяжки."""

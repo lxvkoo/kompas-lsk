@@ -8,3 +8,5 @@ dist/
 *.log
 .probe_out*
 _overlay_shot.png
+*_report.txt
+_*.png
