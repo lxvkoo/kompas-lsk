@@ -312,7 +312,17 @@ class PartModel:
         return [n for n in names if n in current]
 
     def delete(self, names: list[str]) -> int:
-        """Удалить ЛСК по именам. Возвращает количество удалённых."""
+        """Удалить ЛСК по именам. Возвращает количество удалённых (-1 — отменой)."""
+        if not self.env.features.doc_delete:
+            # в COM-API удаления объектов нет: отменяем последнюю команду (Ctrl+Z),
+            # а создание тройки шло внутри контейнера отмены
+            try:
+                self.doc.SetActive()  # отмена действует на активный документ
+                self.app.ExecuteKompasCommand(57643, False)  # ksCMEditUndo
+            except Exception as exc:
+                raise KompasModelError(f"Не удалось отменить создание ЛСК: {exc}") from exc
+            self.rebuild()
+            return -1
         if self._lcs is None:
             return 0
         objs = []

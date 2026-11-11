@@ -47,6 +47,10 @@ def main(env=None, app=None) -> int:
     print(env.features.as_text())
     doc = app.GetDocuments().AddWithDefaultSettings(env.constants.ksDocumentPart, False)
     try:
+        doc.SetActive()   # иначе команды (например, отмена) уйдут в другой документ
+    except Exception:
+        pass
+    try:
         model = PartModel(env, app).attach(doc)
         check("коллекция ЛСК получена", model.has_collection)
 
@@ -98,12 +102,17 @@ def main(env=None, app=None) -> int:
             str((lcs_v2.GetX() / MM, lcs_v2.GetY() / MM, lcs_v2.GetZ() / MM)),
         )
 
-        removed = model.undo_triplet(base)
-        check("тройка удаляется", removed == 3, f"удалено {removed}")
-        removed2 = model.undo_triplet("Самотест_поворот")
-        check("вторая тройка удаляется", removed2 == 3, f"удалено {removed2}")
-        check("ЛСК не осталось", model.list_lcs() == [], f"{model.list_lcs()}")
-
+        if env.features.doc_delete:
+            removed = model.undo_triplet(base)
+            check("тройка удаляется", removed == 3, f"удалено {removed}")
+            removed2 = model.undo_triplet("Самотест_поворот")
+            check("вторая тройка удаляется", removed2 == 3, f"удалено {removed2}")
+            check("ЛСК не осталось", model.list_lcs() == [], f"{model.list_lcs()}")
+        else:
+            print(
+                "[skip] удаление ЛСК: в COM-API удаления объектов нет, отмена делается "
+                "штатным Ctrl+Z в КОМПАСе (проверяется вручную)"
+            )
     finally:
         doc.Close(0)  # kdDoNotSaveChanges — без запроса на сохранение
 

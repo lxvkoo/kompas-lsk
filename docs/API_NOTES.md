@@ -141,6 +141,37 @@ row-major 4×4:
 * данные для стрелки считаются один раз при нажатии (`axis_screen_vectors`),
   поэтому во время протяжки обращений к API нет вообще.
 
+## COM-путь для v22 (где нет `ksapi.py`)
+
+В v22 в `Bin` нет `ksapi.py` и `ksAPICLink.dll` — Python-обёртки ещё не было.
+Зато есть COM-сервер `KOMPAS.Application.7` (в реестре рядом с устаревшим
+`KOMPAS.Application.5`) и `kAPI7.tlb`.
+
+Что выяснено на практике:
+
+* `KOMPAS.Application.5` — старый урезанный API (у документа только
+  `RebuildDocument/CopyPart/Save/Close`). Нужен именно **`.7`**: у него
+  `ActiveDocument`, `Documents`, `ExecuteKompasCommand`, `MainWindowHandle`.
+* pywin32/`win32com` тут не годится: `QueryInterface` для интерфейсов КОМПАСа
+  даёт «There is no interface object registered that supports this IID».
+  Работает `comtypes`: он генерирует Python-интерфейсы прямо из `kAPI7.tlb`
+  (`comtypes.client.GetModule(path_to_tlb)`), после чего
+  `obj.QueryInterface(module.IAuxiliaryGeomContainer)` ведёт себя как надо.
+* IID/GUID всех интерфейсов **совпадают** в v22 и v25 (сверено по
+  `KAPI7Dual.h` из SDK обеих версий), поэтому один код работает там и там.
+* Имена в COM — свойства, а не `Get*`: `part.TopPart`, `lcs.Name`, `lcs.X`,
+  `face.IsPlanar`, `container.Points3D`, `collection.Count`,
+  `collection.LocalCoordinateSystem(i)`, `collection.Point3D(i)`,
+  `frame.GetHWND()`, `doc.UndoContainer = True`.
+* `[out]`-параметры comtypes возвращает кортежем: `face.GetPoint(u, v)` ->
+  `(X, Y, Z, ok)`, `frame.UnConvertCoordinates(type, x, y, z)` -> `(lx, ly, ok)`.
+* `IKompasDocument.Close(closeOptions)` — числовой enum: `0` без сохранения,
+  `1` сохранить, `2` спросить.
+* **Удаления объектов в COM-API нет** — только отмена (`Ctrl+Z`,
+  `IApplication.ExecuteKompasCommand(57643, false)`); работает, если создание шло
+  внутри `UndoContainer`.
+* `IApplication.GetSystemVersion()` возвращает `(major, minor, release, build, ok)`.
+
 ## Отмена: `SetUndoContainer` группирует операции
 
 `IKompasDocument3D.SetUndoContainer(True)` перед изменениями и `(False)` после —
